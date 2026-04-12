@@ -27,8 +27,14 @@ func (c *InMemory) Get(key string, dst any) (bool, error) {
 		return false, nil
 	}
 	dv := reflect.ValueOf(dst)
-	if !dv.IsValid() || dv.Kind() != reflect.Ptr || dv.IsNil() {
-		return false, fmt.Errorf("destination parameter must be a non-nil pointer")
+	if !dv.IsValid() {
+		return false, fmt.Errorf("destination parameter is invalid")
+	}
+	if dv.Kind() != reflect.Ptr {
+		return false, fmt.Errorf("destination parameter must be a pointer")
+	}
+	if dv.IsNil() {
+		return false, fmt.Errorf("destination pointer must be non-nil")
 	}
 	ev := dv.Elem()
 	v := reflect.ValueOf(e.v)

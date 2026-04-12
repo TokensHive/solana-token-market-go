@@ -24,5 +24,6 @@ func DecodePool(protocol market.Protocol, mtype market.MarketType, addr, mint so
 	if protocol == market.ProtocolMeteoraDLMM {
 		meta["estimated_liquidity"] = true
 	}
+	// Placeholder byte-derived decoding is intentionally unverified.
 	return &market.Pool{Address: addr.String(), Protocol: protocol, MarketType: mtype, BaseMint: mint.String(), QuoteMint: solana.SolMint.String(), BaseReserve: base, QuoteReserve: quote, PriceOfTokenInSOL: price, LiquidityInSOL: liq, LiquidityInQuote: liq, IsVerified: false, IsActive: true, Metadata: meta}
 }
