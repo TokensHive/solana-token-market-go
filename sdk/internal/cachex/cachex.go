@@ -28,7 +28,7 @@ func (c *InMemory) Get(key string, dst any) (bool, error) {
 	}
 	dv := reflect.ValueOf(dst)
 	if !dv.IsValid() || dv.Kind() != reflect.Ptr || dv.IsNil() {
-		return false, fmt.Errorf("dst must be a non-nil pointer")
+		return false, fmt.Errorf("destination parameter must be a non-nil pointer")
 	}
 	ev := dv.Elem()
 	v := reflect.ValueOf(e.v)
@@ -44,7 +44,7 @@ func (c *InMemory) Get(key string, dst any) (bool, error) {
 		ev.Set(v.Convert(ev.Type()))
 		return true, nil
 	}
-	return false, fmt.Errorf("cached value type %s cannot be assigned to %s", v.Type(), ev.Type())
+	return false, fmt.Errorf("type mismatch: cached value of type %s cannot be assigned to destination type %s", v.Type(), ev.Type())
 }
 
 func (c *InMemory) Set(key string, value any, ttl time.Duration) error {
