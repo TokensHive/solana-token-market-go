@@ -1,7 +1,9 @@
 package pumpfun
 
-import "github.com/TokensHive/solana-token-market-go/sdk/market"
-import "github.com/shopspring/decimal"
+import (
+	"github.com/TokensHive/solana-token-market-go/sdk/market"
+	"github.com/shopspring/decimal"
+)
 
 func ShouldPreferMigratedPools(curve *market.Pool, migrated []*market.Pool) bool {
 	if curve == nil || !curve.IsComplete {

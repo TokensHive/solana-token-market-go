@@ -200,9 +200,8 @@ func normalize(v, max decimal.Decimal) decimal.Decimal {
 	return v.Div(max)
 }
 
-func scoreForPool(p *Pool, maxLiq, maxTVL decimal.Decimal, preferredQuote *string) {
+func scoreForPool(p *Pool, maxLiq decimal.Decimal, preferredQuote *string) {
 	wLiq := decimal.NewFromFloat(0.35)
-	wTVL := decimal.NewFromFloat(0.20)
 	wFresh := decimal.NewFromFloat(0.15)
 	wQuote := decimal.NewFromFloat(0.10)
 	wVerified := decimal.NewFromFloat(0.10)
@@ -232,7 +231,6 @@ func scoreForPool(p *Pool, maxLiq, maxTVL decimal.Decimal, preferredQuote *strin
 		zeroPenalty = decimal.NewFromInt(1)
 	}
 	score := wLiq.Mul(normalize(p.LiquidityInSOL, maxLiq)).
-		Add(wTVL.Mul(normalize(p.LiquidityInSOL, maxTVL))).
 		Add(wFresh.Mul(freshness)).
 		Add(wQuote.Mul(quotePref)).
 		Add(wVerified.Mul(verified)).
@@ -247,17 +245,13 @@ func sortByScore(pools []*Pool, preferredQuote *string) []*Pool {
 		return cp
 	}
 	maxLiq := decimal.Zero
-	maxTVL := decimal.Zero
 	for _, p := range cp {
 		if p.LiquidityInSOL.GreaterThan(maxLiq) {
 			maxLiq = p.LiquidityInSOL
 		}
-		if p.LiquidityInSOL.GreaterThan(maxTVL) {
-			maxTVL = p.LiquidityInSOL
-		}
 	}
 	for _, p := range cp {
-		scoreForPool(p, maxLiq, maxTVL, preferredQuote)
+		scoreForPool(p, maxLiq, preferredQuote)
 	}
 	sort.SliceStable(cp, func(i, j int) bool {
 		return cp[i].SelectionScore.GreaterThan(cp[j].SelectionScore)

@@ -18,9 +18,11 @@ func DecodePool(protocol market.Protocol, mtype market.MarketType, addr, mint so
 		price = quote.Div(base)
 	}
 	liq := quote.Mul(decimal.NewFromInt(2))
-	meta := map[string]any{}
+	meta := map[string]any{
+		"estimated_from_placeholder_decode": true,
+	}
 	if protocol == market.ProtocolMeteoraDLMM {
 		meta["estimated_liquidity"] = true
 	}
-	return &market.Pool{Address: addr.String(), Protocol: protocol, MarketType: mtype, BaseMint: mint.String(), QuoteMint: solana.SolMint.String(), BaseReserve: base, QuoteReserve: quote, PriceOfTokenInSOL: price, LiquidityInSOL: liq, LiquidityInQuote: liq, IsVerified: true, IsActive: true, Metadata: meta}
+	return &market.Pool{Address: addr.String(), Protocol: protocol, MarketType: mtype, BaseMint: mint.String(), QuoteMint: solana.SolMint.String(), BaseReserve: base, QuoteReserve: quote, PriceOfTokenInSOL: price, LiquidityInSOL: liq, LiquidityInQuote: liq, IsVerified: false, IsActive: true, Metadata: meta}
 }

@@ -22,7 +22,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	pool := solana.MustPublicKeyFromBase58("So11111111111111111111111111111111111111112")
+	tokenMint := solana.MustPublicKeyFromBase58("So11111111111111111111111111111111111111112")
+	resolved, err := client.ResolvePools(context.Background(), market.ResolvePoolsRequest{
+		Mint:          tokenMint,
+		SelectPrimary: true,
+	})
+	if err != nil || len(resolved.Pools) == 0 {
+		fmt.Println("no pools found for mint:", tokenMint.String())
+		return
+	}
+	pool := solana.MustPublicKeyFromBase58(resolved.Pools[0].Address)
 	p, err := client.GetPool(context.Background(), market.GetPoolRequest{PoolAddress: pool})
 	if err != nil {
 		fmt.Println("not found:", err)
