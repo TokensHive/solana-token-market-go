@@ -70,6 +70,7 @@ func (c *Client) finishDebug(recorder *reqdebug.Recorder) {
 	if recorder == nil {
 		return
 	}
+	recorder.MarkDone()
 	c.mu.Lock()
 	c.lastDebug = recorder.SnapshotMap()
 	c.mu.Unlock()

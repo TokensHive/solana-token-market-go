@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"time"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
 	"github.com/gagliardetto/solana-go"
@@ -33,10 +34,12 @@ func NewSolanaRPCClient(endpoint string) *SolanaRPCClient {
 }
 
 func (c *SolanaRPCClient) GetAccount(ctx context.Context, address solana.PublicKey) (*AccountInfo, error) {
-	if recorder := reqdebug.FromContext(ctx); recorder != nil {
-		recorder.RecordRPC("get_account")
-	}
+	recorder := reqdebug.FromContext(ctx)
+	startedAt := time.Now()
 	res, err := c.inner.GetAccountInfoWithOpts(ctx, address, &rpcclient.GetAccountInfoOpts{Encoding: solana.EncodingBase64})
+	if recorder != nil {
+		recorder.RecordRPC("get_account", time.Since(startedAt))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -48,10 +51,12 @@ func (c *SolanaRPCClient) GetAccount(ctx context.Context, address solana.PublicK
 }
 
 func (c *SolanaRPCClient) GetMultipleAccounts(ctx context.Context, addresses []solana.PublicKey) ([]*AccountInfo, error) {
-	if recorder := reqdebug.FromContext(ctx); recorder != nil {
-		recorder.RecordRPC("get_multiple_accounts")
-	}
+	recorder := reqdebug.FromContext(ctx)
+	startedAt := time.Now()
 	res, err := c.inner.GetMultipleAccountsWithOpts(ctx, addresses, &rpcclient.GetMultipleAccountsOpts{Encoding: solana.EncodingBase64})
+	if recorder != nil {
+		recorder.RecordRPC("get_multiple_accounts", time.Since(startedAt))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -68,10 +73,12 @@ func (c *SolanaRPCClient) GetMultipleAccounts(ctx context.Context, addresses []s
 }
 
 func (c *SolanaRPCClient) GetTokenSupply(ctx context.Context, mint solana.PublicKey) (decimal.Decimal, uint8, error) {
-	if recorder := reqdebug.FromContext(ctx); recorder != nil {
-		recorder.RecordRPC("get_token_supply")
-	}
+	recorder := reqdebug.FromContext(ctx)
+	startedAt := time.Now()
 	res, err := c.inner.GetTokenSupply(ctx, mint, rpcclient.CommitmentFinalized)
+	if recorder != nil {
+		recorder.RecordRPC("get_token_supply", time.Since(startedAt))
+	}
 	if err != nil {
 		return decimal.Zero, 0, err
 	}
