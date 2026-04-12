@@ -43,19 +43,22 @@ func (s *Service) ResolvePools(ctx context.Context, req ResolvePoolsRequest) (*R
 	}
 	resp := &ResolvePoolsResponse{Mint: req.Mint.String(), Pools: pools, Metadata: ResolveMetadata{DiscoveryMode: mode, PoolsFound: len(pools), RankedAt: time.Now().UTC(), Debug: meta}}
 	if req.SelectPrimary {
-		var q *string
-		if req.QuoteMint != nil {
-			v := req.QuoteMint.String()
-			q = &v
-		}
-		primary, err := SelectPrimaryPool(pools, req.Mint.String(), q)
-		if err == nil && primary != nil {
-			resp.PrimaryPool = primary
-		}
+		resp.PrimaryPool = selectPrimaryFromRankedPools(pools)
 	}
 	return resp, nil
 }
 
+func selectPrimaryFromRankedPools(pools []*Pool) *Pool {
+	if len(pools) == 0 {
+		return nil
+	}
+	for _, pool := range pools {
+		if pool != nil && pool.IsPrimary {
+			return pool
+		}
+	}
+	return pools[0]
+}
 func (c *Client) GetPool(ctx context.Context, req GetPoolRequest) (*Pool, error) {
 	return c.service.GetPool(ctx, req)
 }
