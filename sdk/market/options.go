@@ -24,6 +24,7 @@ type Config struct {
 	QuoteBridge       quote.Bridge
 	SupplyProvider    supply.Provider
 	Cache             Cache
+	DebugRequests     bool
 	PreferRaydiumAPI  bool
 	PreferMeteoraAPI  bool
 	DefaultMode       DiscoveryMode
@@ -80,6 +81,13 @@ func WithAPIHints(preferRaydiumAPI, preferMeteoraAPI bool) Option {
 	return func(cfg *Config) error {
 		cfg.PreferRaydiumAPI = preferRaydiumAPI
 		cfg.PreferMeteoraAPI = preferMeteoraAPI
+		return nil
+	}
+}
+
+func WithDebugRequests(enabled bool) Option {
+	return func(cfg *Config) error {
+		cfg.DebugRequests = enabled
 		return nil
 	}
 }

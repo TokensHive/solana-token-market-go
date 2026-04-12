@@ -17,10 +17,11 @@ func main() {
 	poolFlag := flag.String("pool", "", "Pool address (for get-pool)")
 	protocolFlag := flag.String("protocol", "", "Protocol override for all-methods")
 	rpcURLFlag := flag.String("rpc", "https://api.mainnet-beta.solana.com", "Solana RPC URL")
+	debugFlag := flag.Bool("debug", false, "Enable per-operation request debug stats")
 	timeoutFlag := flag.Duration("timeout", 30*time.Second, "Request timeout")
 	flag.Parse()
 
-	runner, err := examplecli.NewRunner(*rpcURLFlag)
+	runner, err := examplecli.NewRunner(*rpcURLFlag, *debugFlag)
 	if err != nil {
 		exitErr(err)
 	}
