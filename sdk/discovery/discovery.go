@@ -193,10 +193,10 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 	for i := range scored {
 		scored[i].IsPrimary = i == 0
 	}
-		if len(scored) > 1 && scored[0].Protocol == market.ProtocolPumpfun && scored[0].IsComplete {
-			for _, p := range scored {
-				if p.Protocol != market.ProtocolPumpfun && p.LiquidityInSOL.GreaterThan(decimal.NewFromInt(0)) {
-					p.IsPrimary = true
+	if len(scored) > 1 && scored[0].Protocol == market.ProtocolPumpfun && scored[0].IsComplete {
+		for _, p := range scored {
+			if p.Protocol != market.ProtocolPumpfun && p.LiquidityInSOL.GreaterThan(decimal.NewFromInt(0)) {
+				p.IsPrimary = true
 				scored[0].IsPrimary = false
 				break
 			}
