@@ -1,7 +1,8 @@
 package cachex
 
 import (
-	"context"
+	"fmt"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -18,21 +19,38 @@ type InMemory struct {
 
 func NewInMemory() *InMemory { return &InMemory{m: map[string]entry{}} }
 
-func (c *InMemory) Get(_ context.Context, key string, dst any) (bool, error) {
+func (c *InMemory) Get(key string, dst any) (bool, error) {
 	c.mu.RLock()
 	e, ok := c.m[key]
 	c.mu.RUnlock()
 	if !ok || (!e.exp.IsZero() && time.Now().After(e.exp)) {
 		return false, nil
 	}
-	switch d := dst.(type) {
-	case *any:
-		*d = e.v
+	if dst == nil {
+		return false, fmt.Errorf("dst must be a non-nil pointer")
 	}
-	return true, nil
+	dv := reflect.ValueOf(dst)
+	if dv.Kind() != reflect.Ptr || dv.IsNil() {
+		return false, fmt.Errorf("dst must be a non-nil pointer")
+	}
+	ev := dv.Elem()
+	v := reflect.ValueOf(e.v)
+	if !v.IsValid() {
+		ev.Set(reflect.Zero(ev.Type()))
+		return true, nil
+	}
+	if v.Type().AssignableTo(ev.Type()) {
+		ev.Set(v)
+		return true, nil
+	}
+	if v.Type().ConvertibleTo(ev.Type()) {
+		ev.Set(v.Convert(ev.Type()))
+		return true, nil
+	}
+	return false, fmt.Errorf("cached value type %s cannot be assigned to %s", v.Type(), ev.Type())
 }
 
-func (c *InMemory) Set(_ context.Context, key string, value any, ttl time.Duration) error {
+func (c *InMemory) Set(key string, value any, ttl time.Duration) error {
 	exp := time.Time{}
 	if ttl > 0 {
 		exp = time.Now().Add(ttl)
@@ -43,7 +61,7 @@ func (c *InMemory) Set(_ context.Context, key string, value any, ttl time.Durati
 	return nil
 }
 
-func (c *InMemory) Delete(_ context.Context, key string) error {
+func (c *InMemory) Delete(key string) error {
 	c.mu.Lock()
 	delete(c.m, key)
 	c.mu.Unlock()

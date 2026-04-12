@@ -65,5 +65,22 @@ func DecodePool(address, mint solana.PublicKey, data []byte) *market.Pool {
 		quote = decimal.NewFromInt(int64(data[1]) + 1)
 	}
 	price := quote.Div(base)
-	return &market.Pool{Address: address.String(), Protocol: market.ProtocolPumpswap, MarketType: market.MarketTypeConstantProduct, BaseMint: mint.String(), QuoteMint: solana.SolMint.String(), BaseReserve: base, QuoteReserve: quote, PriceOfTokenInSOL: price, LiquidityInSOL: quote.Mul(decimal.NewFromInt(2)), LiquidityInQuote: quote.Mul(decimal.NewFromInt(2)), IsVerified: true, IsActive: true, Metadata: map[string]any{}}
+	liq := quote.Mul(decimal.NewFromInt(2))
+	return &market.Pool{
+		Address:           address.String(),
+		Protocol:          market.ProtocolPumpswap,
+		MarketType:        market.MarketTypeConstantProduct,
+		BaseMint:          mint.String(),
+		QuoteMint:         solana.SolMint.String(),
+		BaseReserve:       base,
+		QuoteReserve:      quote,
+		PriceOfTokenInSOL: price,
+		LiquidityInSOL:    liq,
+		LiquidityInQuote:  liq,
+		IsVerified:        false,
+		IsActive:          true,
+		Metadata: map[string]any{
+			"estimated_from_placeholder_decode": true,
+		},
+	}
 }

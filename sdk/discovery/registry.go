@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"sort"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
@@ -37,9 +38,17 @@ func (r *Registry) Get(protocol market.Protocol) (Adapter, bool) {
 
 func (r *Registry) List(protocols []market.Protocol) []Adapter {
 	if len(protocols) == 0 {
-		out := make([]Adapter, 0, len(r.adapters))
-		for _, a := range r.adapters {
-			out = append(out, a)
+		keys := make([]string, 0, len(r.adapters))
+		byKey := make(map[string]Adapter, len(r.adapters))
+		for protocol, a := range r.adapters {
+			k := string(protocol)
+			keys = append(keys, k)
+			byKey[k] = a
+		}
+		sort.Strings(keys)
+		out := make([]Adapter, 0, len(keys))
+		for _, k := range keys {
+			out = append(out, byKey[k])
 		}
 		return out
 	}
