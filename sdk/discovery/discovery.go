@@ -134,7 +134,7 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 			maxLiq = p.LiquidityInSOL
 		}
 	}
-	score := func(p *market.Pool) market.Decimal {
+	score := func(p *market.Pool) {
 		w1 := decimal.NewFromFloat(0.35)
 		w2 := decimal.NewFromFloat(0.20)
 		w3 := decimal.NewFromFloat(0.05)
@@ -187,9 +187,11 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 			Sub(w8.Mul(zeroPenalty))
 		p.SelectionScore = s
 		p.SelectionReason = "deterministic weighted ranking"
-		return s
 	}
-	sort.SliceStable(scored, func(i, j int) bool { return score(scored[i]).GreaterThan(score(scored[j])) })
+	for _, p := range scored {
+		score(p)
+	}
+	sort.SliceStable(scored, func(i, j int) bool { return scored[i].SelectionScore.GreaterThan(scored[j].SelectionScore) })
 	for i := range scored {
 		scored[i].IsPrimary = i == 0
 	}

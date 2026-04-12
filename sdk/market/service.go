@@ -42,7 +42,7 @@ func (s *Service) ResolvePools(ctx context.Context, req ResolvePoolsRequest) (*R
 		return nil, err
 	}
 	resp := &ResolvePoolsResponse{Mint: req.Mint.String(), Pools: pools, Metadata: ResolveMetadata{DiscoveryMode: mode, PoolsFound: len(pools), RankedAt: time.Now().UTC(), Debug: meta}}
-	if req.SelectPrimary || req.SelectPrimary == false {
+	if req.SelectPrimary {
 		var q *string
 		if req.QuoteMint != nil {
 			v := req.QuoteMint.String()
@@ -155,12 +155,23 @@ func (c *Client) ComputeTokenMetricsFromPool(ctx context.Context, mint solana.Pu
 }
 
 func SelectPrimaryPool(pools []*Pool, targetMint string, quoteMint *string) (*Pool, error) {
-	_ = targetMint
-	_ = quoteMint
 	if len(pools) == 0 {
 		return nil, NewError(ErrCodeNotFound, "no pools found", nil)
 	}
-	ranked := sortByScore(pools)
+	candidates := make([]*Pool, 0, len(pools))
+	for _, p := range pools {
+		if p == nil {
+			continue
+		}
+		if targetMint != "" && p.BaseMint != "" && p.BaseMint != targetMint && p.QuoteMint != targetMint {
+			continue
+		}
+		candidates = append(candidates, p)
+	}
+	if len(candidates) == 0 {
+		candidates = pools
+	}
+	ranked := sortByScore(candidates, quoteMint)
 	if len(ranked) == 0 {
 		return nil, NewError(ErrCodeNotFound, "no rankable pools", nil)
 	}
@@ -186,7 +197,7 @@ func normalize(v, max decimal.Decimal) decimal.Decimal {
 	return v.Div(max)
 }
 
-func scoreForPool(p *Pool, maxLiq, maxTVL decimal.Decimal) decimal.Decimal {
+func scoreForPool(p *Pool, maxLiq, maxTVL decimal.Decimal, preferredQuote *string) {
 	wLiq := decimal.NewFromFloat(0.35)
 	wTVL := decimal.NewFromFloat(0.20)
 	wFresh := decimal.NewFromFloat(0.15)
@@ -201,6 +212,9 @@ func scoreForPool(p *Pool, maxLiq, maxTVL decimal.Decimal) decimal.Decimal {
 	quotePref := decimal.NewFromFloat(0.5)
 	if p.QuoteMint == solana.SolMint.String() {
 		quotePref = decimal.NewFromInt(1)
+	}
+	if preferredQuote != nil && p.QuoteMint == *preferredQuote {
+		quotePref = decimal.NewFromFloat(1.1)
 	}
 	verified := decimal.Zero
 	if p.IsVerified {
@@ -222,10 +236,9 @@ func scoreForPool(p *Pool, maxLiq, maxTVL decimal.Decimal) decimal.Decimal {
 		Sub(wStalePenalty.Mul(stalePenalty)).
 		Sub(wZeroReservePenalty.Mul(zeroPenalty))
 	p.SelectionScore = score
-	return score
 }
 
-func sortByScore(pools []*Pool) []*Pool {
+func sortByScore(pools []*Pool, preferredQuote *string) []*Pool {
 	cp := append([]*Pool{}, pools...)
 	if len(cp) == 0 {
 		return cp
@@ -241,7 +254,7 @@ func sortByScore(pools []*Pool) []*Pool {
 		}
 	}
 	for _, p := range cp {
-		scoreForPool(p, maxLiq, maxTVL)
+		scoreForPool(p, maxLiq, maxTVL, preferredQuote)
 	}
 	sort.SliceStable(cp, func(i, j int) bool {
 		return cp[i].SelectionScore.GreaterThan(cp[j].SelectionScore)
