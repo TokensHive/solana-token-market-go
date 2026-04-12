@@ -5,13 +5,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/TokensHive/solana-token-market-go/examples/internal/examplecli"
 )
 
 func main() {
+	commandFlag := flag.String("cmd", string(examplecli.CommandInteractive), "Command: resolve-pools|get-pool|get-token-market|all-methods|batch-all|interactive")
 	mintFlag := flag.String("mint", examplecli.SampleMints[0], "Token mint address")
+	poolFlag := flag.String("pool", "", "Pool address (for get-pool)")
+	protocolFlag := flag.String("protocol", "", "Protocol override for all-methods")
 	rpcURLFlag := flag.String("rpc", "https://api.mainnet-beta.solana.com", "Solana RPC URL")
 	timeoutFlag := flag.Duration("timeout", 30*time.Second, "Request timeout")
 	flag.Parse()
@@ -24,7 +28,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeoutFlag)
 	defer cancel()
 
-	if err := runner.GetTokenMarket(ctx, *mintFlag); err != nil {
+	command := examplecli.Command(strings.TrimSpace(*commandFlag))
+	if command == examplecli.CommandInteractive {
+		err = examplecli.RunInteractive(ctx, runner)
+	} else {
+		err = examplecli.RunCommand(ctx, runner, command, *mintFlag, *poolFlag, *protocolFlag)
+	}
+	if err != nil {
 		exitErr(err)
 	}
 }

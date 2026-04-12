@@ -83,11 +83,14 @@ func (c *Client) GetTokenMarket(ctx context.Context, req GetTokenMarketRequest) 
 
 func (s *Service) GetTokenMarket(ctx context.Context, req GetTokenMarketRequest) (*GetTokenMarketResponse, error) {
 	resolved, err := s.ResolvePools(ctx, ResolvePoolsRequest{
-		Mint:          req.Mint,
-		QuoteMint:     req.QuoteMint,
-		Protocols:     req.Protocols,
-		DiscoveryMode: req.DiscoveryMode,
-		SelectPrimary: true,
+		Mint:              req.Mint,
+		QuoteMint:         req.QuoteMint,
+		Protocols:         req.Protocols,
+		DiscoveryMode:     req.DiscoveryMode,
+		IncludeInactive:   req.IncludeInactive,
+		IncludeUnverified: req.IncludeUnverified,
+		DirectSOLOnly:     req.DirectSOLOnly,
+		SelectPrimary:     true,
 	})
 	if err != nil {
 		return nil, err
@@ -118,7 +121,7 @@ func (s *Service) GetTokenMarket(ctx context.Context, req GetTokenMarketRequest)
 }
 
 func (c *Client) FindPoolsByMint(ctx context.Context, mint solana.PublicKey) ([]*Pool, error) {
-	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, SelectPrimary: false})
+	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, IncludeUnverified: true, SelectPrimary: false})
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +129,7 @@ func (c *Client) FindPoolsByMint(ctx context.Context, mint solana.PublicKey) ([]
 }
 
 func (c *Client) FindPoolsByPair(ctx context.Context, baseMint, quoteMint solana.PublicKey) ([]*Pool, error) {
-	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: baseMint, QuoteMint: &quoteMint, SelectPrimary: false})
+	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: baseMint, QuoteMint: &quoteMint, IncludeUnverified: true, SelectPrimary: false})
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +137,7 @@ func (c *Client) FindPoolsByPair(ctx context.Context, baseMint, quoteMint solana
 }
 
 func (c *Client) FindPoolsByProtocol(ctx context.Context, mint solana.PublicKey, protocol Protocol) ([]*Pool, error) {
-	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, Protocols: []Protocol{protocol}, SelectPrimary: false})
+	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, Protocols: []Protocol{protocol}, IncludeUnverified: true, SelectPrimary: false})
 	if err != nil {
 		return nil, err
 	}
