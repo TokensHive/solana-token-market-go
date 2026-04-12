@@ -201,7 +201,7 @@ func normalize(v, max decimal.Decimal) decimal.Decimal {
 }
 
 func scoreForPool(p *Pool, maxLiq decimal.Decimal, preferredQuote *string) {
-	wLiq := decimal.NewFromFloat(0.35)
+	wLiq := decimal.NewFromFloat(0.55)
 	wFresh := decimal.NewFromFloat(0.15)
 	wQuote := decimal.NewFromFloat(0.10)
 	wVerified := decimal.NewFromFloat(0.10)

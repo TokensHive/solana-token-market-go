@@ -29,8 +29,9 @@ func DecodeConstantProductPool(address, mint solana.PublicKey, protocol market.P
 		PriceOfTokenInSOL: price,
 		LiquidityInSOL:    liq,
 		LiquidityInQuote:  liq,
-		IsVerified:        false,
-		IsActive:          true,
+		// Placeholder byte-derived decoding is intentionally unverified.
+		IsVerified: false,
+		IsActive:   true,
 		Metadata: map[string]any{
 			"estimated_from_placeholder_decode": true,
 		},
