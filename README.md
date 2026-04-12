@@ -35,6 +35,9 @@ Default is `onchain`.
 - `hybrid`
 
 `PreferRaydiumAPI` and `PreferMeteoraAPI` are optional hints only.
+When `PreferRaydiumAPI` is enabled and on-chain discovery is empty (or has no usable SOL price),
+the SDK applies API fallback discovery (Raydium first, then DexScreener enrichment) to recover
+real pool pairs/prices.
 
 ## Public API
 

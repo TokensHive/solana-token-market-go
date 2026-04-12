@@ -163,6 +163,7 @@ type DiscoveryRequest struct {
 	DiscoveryMode     DiscoveryMode
 	PoolAddresses     []solana.PublicKey
 	DirectSOLOnly     bool
+	PreferRaydiumAPI  bool
 }
 
 type DiscoveryEngine interface {

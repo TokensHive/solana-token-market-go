@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/protocols/meteora"
@@ -62,6 +63,16 @@ func (e *Engine) Discover(ctx context.Context, req market.DiscoveryRequest) ([]*
 		}
 		all = append(all, pools...)
 	}
+	if req.PreferRaydiumAPI && (len(all) == 0 || !hasNonZeroSOLPrice(all)) {
+		apiPools, apiMeta, apiErr := discoverAPIFallback(ctx, req)
+		if apiErr != nil {
+			adapterErrs = append(adapterErrs, apiErr)
+		}
+		if len(apiPools) > 0 {
+			all = append(all, apiPools...)
+			meta["api_fallback"] = apiMeta
+		}
+	}
 	all = DeduplicatePools(all)
 	all = ApplyFilters(all, FilterOptions{
 		Protocols:         req.Protocols,
@@ -116,6 +127,18 @@ func (e *Engine) FindByPoolAddress(ctx context.Context, addr solana.PublicKey) (
 	return nil, map[string]any{}, nil
 }
 
+func hasNonZeroSOLPrice(pools []*market.Pool) bool {
+	for _, p := range pools {
+		if p == nil {
+			continue
+		}
+		if p.PriceOfTokenInSOL.GreaterThan(decimal.Zero) && (pubkeyx.IsSOLMintString(p.BaseMint) || pubkeyx.IsSOLMintString(p.QuoteMint)) {
+			return true
+		}
+	}
+	return false
+}
+
 func DeduplicatePools(pools []*market.Pool) []*market.Pool {
 	seen := map[string]struct{}{}
 	out := make([]*market.Pool, 0, len(pools))
@@ -164,6 +187,7 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 		w6 := decimal.NewFromFloat(0.10)
 		w7 := decimal.NewFromFloat(0.03)
 		w8 := decimal.NewFromFloat(0.02)
+		w9 := decimal.NewFromFloat(0.05)
 		normLiq := decimal.Zero
 		if !maxLiq.IsZero() {
 			normLiq = p.LiquidityInSOL.Div(maxLiq)
@@ -183,7 +207,7 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 		quotePref := decimal.NewFromFloat(0.5)
 		if quoteMint != nil && p.QuoteMint == *quoteMint {
 			quotePref = decimal.NewFromFloat(1)
-		} else if p.QuoteMint == solana.SolMint.String() {
+		} else if pubkeyx.IsSOLMintString(p.QuoteMint) {
 			quotePref = decimal.NewFromFloat(0.95)
 		}
 		verified := decimal.NewFromInt(0)
@@ -198,12 +222,17 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 		if p.BaseReserve.IsZero() || p.QuoteReserve.IsZero() {
 			zeroPenalty = decimal.NewFromInt(1)
 		}
+		priceSignal := decimal.Zero
+		if p.PriceOfTokenInSOL.GreaterThan(decimal.Zero) {
+			priceSignal = decimal.NewFromInt(1)
+		}
 		s := w1.Mul(normLiq).
 			Add(w2.Mul(normTVL)).
 			Add(w3.Mul(normVol)).
 			Add(w4.Mul(fresh)).
 			Add(w5.Mul(quotePref)).
 			Add(w6.Mul(verified)).
+			Add(w9.Mul(priceSignal)).
 			Sub(w7.Mul(stalePenalty)).
 			Sub(w8.Mul(zeroPenalty))
 		p.SelectionScore = s

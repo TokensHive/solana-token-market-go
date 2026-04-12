@@ -1,5 +1,5 @@
 package quote
 
-import "github.com/gagliardetto/solana-go"
+import "github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 
-func IsSOL(m string) bool { return m == solana.SolMint.String() }
+func IsSOL(m string) bool { return pubkeyx.IsSOLMintString(m) }

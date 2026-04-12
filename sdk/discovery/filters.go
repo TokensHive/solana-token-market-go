@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/gagliardetto/solana-go"
 )
@@ -55,7 +56,7 @@ func ApplyFilters(pools []*market.Pool, opts FilterOptions) []*market.Pool {
 				continue
 			}
 		}
-		if opts.DirectSOLOnly && p.QuoteMint != solana.SolMint.String() {
+		if opts.DirectSOLOnly && !pubkeyx.IsSOLMintString(p.QuoteMint) {
 			continue
 		}
 		out = append(out, p)

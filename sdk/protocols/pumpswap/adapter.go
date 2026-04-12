@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
@@ -71,7 +72,7 @@ func DecodePool(address, mint solana.PublicKey, data []byte) *market.Pool {
 		Protocol:          market.ProtocolPumpswap,
 		MarketType:        market.MarketTypeConstantProduct,
 		BaseMint:          mint.String(),
-		QuoteMint:         solana.SolMint.String(),
+		QuoteMint:         pubkeyx.WrappedSOLMintStr,
 		BaseReserve:       base,
 		QuoteReserve:      quote,
 		PriceOfTokenInSOL: price,

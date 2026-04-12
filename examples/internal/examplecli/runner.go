@@ -41,6 +41,7 @@ func NewRunner(rpcURL string) (*Runner, error) {
 		market.WithRPCClient(rpcClient),
 		market.WithParserAdapter(parser.NewNoopAdapter()),
 		market.WithDiscoveryEngine(engine),
+		market.WithAPIHints(true, false),
 	)
 	if err != nil {
 		return nil, err
@@ -94,7 +95,7 @@ func (r *Runner) ResolvePools(ctx context.Context, mintStr string) error {
 	}
 	fmt.Printf("mint=%s pools=%d primary=%v mode=%s\n", resp.Mint, len(resp.Pools), resp.PrimaryPool != nil, resp.Metadata.DiscoveryMode)
 	if resp.PrimaryPool != nil {
-		fmt.Printf("primaryPool=%s protocol=%s liqSOL=%s\n", resp.PrimaryPool.Address, resp.PrimaryPool.Protocol, resp.PrimaryPool.LiquidityInSOL)
+		fmt.Printf("primaryPool=%s protocol=%s pair=%s/%s priceSOL=%s liqSOL=%s\n", resp.PrimaryPool.Address, resp.PrimaryPool.Protocol, resp.PrimaryPool.BaseMint, resp.PrimaryPool.QuoteMint, resp.PrimaryPool.PriceOfTokenInSOL, resp.PrimaryPool.LiquidityInSOL)
 	}
 	return nil
 }
@@ -123,7 +124,7 @@ func (r *Runner) GetTokenMarket(ctx context.Context, mintStr string) error {
 	}
 	fmt.Printf("mint=%s priceSOL=%s liqSOL=%s marketCapSOL=%s pools=%d\n", resp.Mint, resp.PriceInSOL, resp.LiquidityInSOL, resp.MarketCapInSOL, len(resp.Pools))
 	if resp.PrimaryPool != nil {
-		fmt.Printf("primaryPool=%s protocol=%s\n", resp.PrimaryPool.Address, resp.PrimaryPool.Protocol)
+		fmt.Printf("primaryPool=%s protocol=%s pair=%s/%s priceSOL=%s\n", resp.PrimaryPool.Address, resp.PrimaryPool.Protocol, resp.PrimaryPool.BaseMint, resp.PrimaryPool.QuoteMint, resp.PrimaryPool.PriceOfTokenInSOL)
 	}
 	return nil
 }
@@ -139,6 +140,9 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		fmt.Printf("ResolvePools: error=%v\n", resolvePoolsErr)
 	} else {
 		fmt.Printf("ResolvePools: pools=%d primary=%v\n", len(resolved.Pools), resolved.PrimaryPool != nil)
+		if resolved.PrimaryPool != nil {
+			fmt.Printf("ResolvePools primary: pair=%s/%s protocol=%s priceSOL=%s\n", resolved.PrimaryPool.BaseMint, resolved.PrimaryPool.QuoteMint, resolved.PrimaryPool.Protocol, resolved.PrimaryPool.PriceOfTokenInSOL)
+		}
 	}
 
 	poolsByMint, byMintErr := r.client.FindPoolsByMint(ctx, mint)
@@ -156,6 +160,9 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	}
 
 	var pool *market.Pool
+	if resolved != nil && resolved.PrimaryPool != nil {
+		pool = resolved.PrimaryPool
+	}
 	if resolved != nil && len(resolved.Pools) > 0 {
 		poolKey, parseErr := ParsePublicKey(resolved.Pools[0].Address)
 		if parseErr != nil {
@@ -165,8 +172,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 			if getPoolErr != nil {
 				fmt.Printf("GetPool: error=%v\n", getPoolErr)
 			} else {
-				pool = gotPool
-				fmt.Printf("GetPool: address=%s protocol=%s\n", pool.Address, pool.Protocol)
+				fmt.Printf("GetPool: address=%s protocol=%s\n", gotPool.Address, gotPool.Protocol)
 			}
 		}
 	} else {
