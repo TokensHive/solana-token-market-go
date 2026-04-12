@@ -26,11 +26,8 @@ func (c *InMemory) Get(key string, dst any) (bool, error) {
 	if !ok || (!e.exp.IsZero() && time.Now().After(e.exp)) {
 		return false, nil
 	}
-	if dst == nil {
-		return false, fmt.Errorf("dst must be a non-nil pointer")
-	}
 	dv := reflect.ValueOf(dst)
-	if dv.Kind() != reflect.Ptr || dv.IsNil() {
+	if !dv.IsValid() || dv.Kind() != reflect.Ptr || dv.IsNil() {
 		return false, fmt.Errorf("dst must be a non-nil pointer")
 	}
 	ev := dv.Elem()
