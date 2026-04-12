@@ -65,6 +65,12 @@ See examples:
 - `examples/get_token_market`
 - `examples/get_pool`
 
+To enable default parser registrations explicitly (opt-in):
+
+```go
+import _ "github.com/TokensHive/solana-token-market-go/sdk/parser/all"
+```
+
 ## Protocol limitations / approximations
 
 - CLMM/Whirlpool/DLMM liquidity is currently best-effort and marked via metadata.
