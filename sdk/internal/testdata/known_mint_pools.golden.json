@@ -1,0 +1,8 @@
+{
+  "mint": "So11111111111111111111111111111111111111112",
+  "primary_pool": "pool-raydium-sol",
+  "pools": [
+    {"address": "pool-raydium-sol", "protocol": "raydium_cpmm", "quote_mint": "So11111111111111111111111111111111111111112", "liquidity_in_sol": "120.5"},
+    {"address": "pool-raydium-usdc", "protocol": "raydium_cpmm", "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "liquidity_in_sol": "95.2"}
+  ]
+}
