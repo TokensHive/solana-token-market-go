@@ -71,7 +71,7 @@ func RunInteractive(ctx context.Context, runner *Runner) error {
 			return err
 		}
 	case CommandBatchAll:
-		// Uses built-in sample mint list.
+		// No mint prompt is needed; batch-all iterates the built-in sample mint list.
 	case CommandGetPool:
 		pool, err = prompt(reader, "Pool address", "")
 		if err != nil {

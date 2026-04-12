@@ -134,9 +134,9 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		return err
 	}
 	fmt.Printf("== Running public market methods for mint=%s ==\n", mint.String())
-	resolved, resolveErr := r.client.ResolvePools(ctx, market.ResolvePoolsRequest{Mint: mint, IncludeUnverified: true, SelectPrimary: true})
-	if resolveErr != nil {
-		fmt.Printf("ResolvePools: error=%v\n", resolveErr)
+	resolved, resolvePoolsErr := r.client.ResolvePools(ctx, market.ResolvePoolsRequest{Mint: mint, IncludeUnverified: true, SelectPrimary: true})
+	if resolvePoolsErr != nil {
+		fmt.Printf("ResolvePools: error=%v\n", resolvePoolsErr)
 	} else {
 		fmt.Printf("ResolvePools: pools=%d primary=%v\n", len(resolved.Pools), resolved.PrimaryPool != nil)
 	}
@@ -241,8 +241,13 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		fmt.Println("SelectPrimaryPool: skipped (resolve failed)")
 	}
 
-	if resolveErr != nil && byMintErr != nil && tokenMarketErr != nil {
-		return errors.New("core discovery methods failed; check RPC endpoint and token activity")
+	if resolvePoolsErr != nil && byMintErr != nil && tokenMarketErr != nil {
+		return fmt.Errorf(
+			"core discovery methods failed (ResolvePools=%v, FindPoolsByMint=%v, GetTokenMarket=%v); check RPC endpoint and token activity",
+			resolvePoolsErr,
+			byMintErr,
+			tokenMarketErr,
+		)
 	}
 	fmt.Println("== Completed public market methods demo ==")
 	return nil
