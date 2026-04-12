@@ -1,3 +1,3 @@
 package parser
 
-import _ "github.com/DefaultPerson/solana-dex-parser-go/parsers"
+// Parser registrations are opt-in via sdk/parser/all.
