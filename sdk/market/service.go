@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/gagliardetto/solana-go"
 	"github.com/shopspring/decimal"
 )
@@ -37,6 +38,7 @@ func (s *Service) ResolvePools(ctx context.Context, req ResolvePoolsRequest) (*R
 		DiscoveryMode:     mode,
 		PoolAddresses:     req.PoolAddresses,
 		DirectSOLOnly:     req.DirectSOLOnly,
+		PreferRaydiumAPI:  s.cfg.PreferRaydiumAPI,
 	})
 	if err != nil {
 		return nil, err
@@ -215,7 +217,7 @@ func scoreForPool(p *Pool, maxLiq decimal.Decimal, preferredQuote *string) {
 		freshness = decimal.NewFromFloat(0.25)
 	}
 	quotePref := decimal.NewFromFloat(0.5)
-	if p.QuoteMint == solana.SolMint.String() {
+	if pubkeyx.IsSOLMintString(p.QuoteMint) {
 		quotePref = decimal.NewFromInt(1)
 	}
 	if preferredQuote != nil && p.QuoteMint == *preferredQuote {

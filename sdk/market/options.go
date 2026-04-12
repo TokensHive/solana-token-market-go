@@ -3,6 +3,7 @@ package market
 import (
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/quote"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
@@ -43,7 +44,7 @@ func defaultConfig() Config {
 			solana.MustPublicKeyFromBase58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), // USDC
 			solana.MustPublicKeyFromBase58("Es9vMFrzaCERmJfrF4H2ZQ8QYfV7kRXKuX3sX5Yucs5b"), // USDT
 		},
-		DefaultQuoteMints: []solana.PublicKey{solana.SolMint},
+		DefaultQuoteMints: []solana.PublicKey{pubkeyx.WrappedSOLMint, solana.SolMint},
 	}
 }
 
