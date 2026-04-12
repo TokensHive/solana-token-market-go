@@ -63,7 +63,7 @@ func (e *Engine) Discover(ctx context.Context, req market.DiscoveryRequest) ([]*
 		}
 		all = append(all, pools...)
 	}
-	if req.PreferRaydiumAPI && (len(all) == 0 || !hasNonZeroSOLPrice(all)) {
+	if req.PreferRaydiumAPI && (len(all) == 0 || !hasSOLPairWithPrice(all)) {
 		apiPools, apiMeta, apiErr := discoverAPIFallback(ctx, req)
 		if apiErr != nil {
 			adapterErrs = append(adapterErrs, apiErr)
@@ -127,7 +127,7 @@ func (e *Engine) FindByPoolAddress(ctx context.Context, addr solana.PublicKey) (
 	return nil, map[string]any{}, nil
 }
 
-func hasNonZeroSOLPrice(pools []*market.Pool) bool {
+func hasSOLPairWithPrice(pools []*market.Pool) bool {
 	for _, p := range pools {
 		if p == nil {
 			continue

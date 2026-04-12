@@ -163,7 +163,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	if resolved != nil && resolved.PrimaryPool != nil {
 		pool = resolved.PrimaryPool
 	}
-	if resolved != nil && len(resolved.Pools) > 0 {
+	if pool == nil && resolved != nil && len(resolved.Pools) > 0 {
 		poolKey, parseErr := ParsePublicKey(resolved.Pools[0].Address)
 		if parseErr != nil {
 			fmt.Printf("GetPool: parse error=%v\n", parseErr)
@@ -172,11 +172,14 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 			if getPoolErr != nil {
 				fmt.Printf("GetPool: error=%v\n", getPoolErr)
 			} else {
+				pool = gotPool
 				fmt.Printf("GetPool: address=%s protocol=%s\n", gotPool.Address, gotPool.Protocol)
 			}
 		}
-	} else {
+	} else if pool == nil {
 		fmt.Println("GetPool: skipped (no resolved pools)")
+	} else {
+		fmt.Printf("GetPool: skipped (using resolved primary pool %s)\n", pool.Address)
 	}
 
 	if pool != nil {

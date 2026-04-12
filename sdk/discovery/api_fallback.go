@@ -249,7 +249,10 @@ func discoverDexScreenerPoolsByMint(ctx context.Context, mint solana.PublicKey) 
 		if baseMint == "" || quoteMint == "" {
 			continue
 		}
-		protocol := protocolFromDexID(pair.DexID)
+		protocol, ok := protocolFromDexID(pair.DexID)
+		if !ok {
+			continue
+		}
 		marketType := marketTypeFromProtocol(protocol)
 		priceNative, _ := decimal.NewFromString(strings.TrimSpace(pair.PriceNative))
 		liqBase := decimalFromAny(pair.Liquidity.Base)
@@ -292,20 +295,20 @@ func discoverDexScreenerPoolsByMint(ctx context.Context, mint solana.PublicKey) 
 	return out, nil
 }
 
-func protocolFromDexID(dexID string) market.Protocol {
+func protocolFromDexID(dexID string) (market.Protocol, bool) {
 	switch strings.ToLower(strings.TrimSpace(dexID)) {
 	case "raydium":
-		return market.ProtocolRaydiumCPMM
+		return market.ProtocolRaydiumCPMM, true
 	case "pumpswap":
-		return market.ProtocolPumpswap
+		return market.ProtocolPumpswap, true
 	case "pumpfun":
-		return market.ProtocolPumpfun
+		return market.ProtocolPumpfun, true
 	case "orca":
-		return market.ProtocolOrcaWhirlpool
+		return market.ProtocolOrcaWhirlpool, true
 	case "meteora":
-		return market.ProtocolMeteoraDAMM
+		return market.ProtocolMeteoraDAMM, true
 	default:
-		return market.ProtocolPumpfun
+		return "", false
 	}
 }
 
