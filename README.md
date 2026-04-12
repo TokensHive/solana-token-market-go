@@ -92,8 +92,8 @@ client, err := market.NewClient(
 )
 ```
 
-When enabled, each public API call records categorized request usage in debug metadata
-(`rpc` by operation type, `api` by source + operation type), and the examples CLI prints it.
+When enabled, each public API call records categorized request usage and timing in debug metadata
+(`duration_ms`, `rpc` by operation type with per-call timings, `api` by source + operation type with per-call timings), and the examples CLI prints it.
 
 To enable default parser registrations explicitly (opt-in):
 
