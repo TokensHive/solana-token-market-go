@@ -1,6 +1,10 @@
 package market
 
 import (
+	"context"
+	"sync"
+
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/quote"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
@@ -8,8 +12,10 @@ import (
 )
 
 type Client struct {
-	cfg     Config
-	service *Service
+	cfg       Config
+	service   *Service
+	mu        sync.RWMutex
+	lastDebug map[string]any
 }
 
 func NewClient(opts ...Option) (*Client, error) {
@@ -37,4 +43,34 @@ func NewClient(opts ...Option) (*Client, error) {
 	c := &Client{cfg: cfg}
 	c.service = NewService(cfg)
 	return c, nil
+}
+
+func (c *Client) LastRequestDebug() map[string]any {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.lastDebug == nil {
+		return nil
+	}
+	out := make(map[string]any, len(c.lastDebug))
+	for k, v := range c.lastDebug {
+		out[k] = v
+	}
+	return out
+}
+
+func (c *Client) startDebug(ctx context.Context, operation string) (context.Context, *reqdebug.Recorder) {
+	if !c.cfg.DebugRequests {
+		return ctx, nil
+	}
+	recorder := reqdebug.NewRecorder(operation)
+	return reqdebug.WithRecorder(ctx, recorder), recorder
+}
+
+func (c *Client) finishDebug(recorder *reqdebug.Recorder) {
+	if recorder == nil {
+		return
+	}
+	c.mu.Lock()
+	c.lastDebug = recorder.SnapshotMap()
+	c.mu.Unlock()
 }

@@ -28,9 +28,10 @@ var SampleMints = []string{
 
 type Runner struct {
 	client *market.Client
+	debug  bool
 }
 
-func NewRunner(rpcURL string) (*Runner, error) {
+func NewRunner(rpcURL string, debug bool) (*Runner, error) {
 	rpcURL = strings.TrimSpace(rpcURL)
 	if rpcURL == "" {
 		rpcURL = "https://api.mainnet-beta.solana.com"
@@ -42,11 +43,24 @@ func NewRunner(rpcURL string) (*Runner, error) {
 		market.WithParserAdapter(parser.NewNoopAdapter()),
 		market.WithDiscoveryEngine(engine),
 		market.WithAPIHints(true, false),
+		market.WithDebugRequests(debug),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &Runner{client: client}, nil
+	return &Runner{client: client, debug: debug}, nil
+}
+
+func (r *Runner) printDebug(label string) {
+	if !r.debug {
+		return
+	}
+	debug := r.client.LastRequestDebug()
+	if len(debug) == 0 {
+		fmt.Printf("%s debug: no request stats\n", label)
+		return
+	}
+	fmt.Printf("%s debug: %v\n", label, debug)
 }
 
 func ParsePublicKey(value string) (solana.PublicKey, error) {
@@ -90,6 +104,7 @@ func (r *Runner) ResolvePools(ctx context.Context, mintStr string) error {
 		return err
 	}
 	resp, err := r.client.ResolvePools(ctx, market.ResolvePoolsRequest{Mint: mint, IncludeUnverified: true, SelectPrimary: true})
+	r.printDebug("ResolvePools")
 	if err != nil {
 		return err
 	}
@@ -106,6 +121,7 @@ func (r *Runner) GetPool(ctx context.Context, poolStr string) error {
 		return err
 	}
 	resp, err := r.client.GetPool(ctx, market.GetPoolRequest{PoolAddress: pool})
+	r.printDebug("GetPool")
 	if err != nil {
 		return err
 	}
@@ -119,6 +135,7 @@ func (r *Runner) GetTokenMarket(ctx context.Context, mintStr string) error {
 		return err
 	}
 	resp, err := r.client.GetTokenMarket(ctx, market.GetTokenMarketRequest{Mint: mint, IncludeUnverified: true})
+	r.printDebug("GetTokenMarket")
 	if err != nil {
 		return err
 	}
@@ -136,6 +153,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	}
 	fmt.Printf("== Running public market methods for mint=%s ==\n", mint.String())
 	resolved, resolvePoolsErr := r.client.ResolvePools(ctx, market.ResolvePoolsRequest{Mint: mint, IncludeUnverified: true, SelectPrimary: true})
+	r.printDebug("ResolvePools")
 	if resolvePoolsErr != nil {
 		fmt.Printf("ResolvePools: error=%v\n", resolvePoolsErr)
 	} else {
@@ -146,6 +164,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	}
 
 	poolsByMint, byMintErr := r.client.FindPoolsByMint(ctx, mint)
+	r.printDebug("FindPoolsByMint")
 	if byMintErr != nil {
 		fmt.Printf("FindPoolsByMint: error=%v\n", byMintErr)
 	} else {
@@ -153,6 +172,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	}
 
 	marketResp, tokenMarketErr := r.client.GetTokenMarket(ctx, market.GetTokenMarketRequest{Mint: mint, IncludeUnverified: true})
+	r.printDebug("GetTokenMarket")
 	if tokenMarketErr != nil {
 		fmt.Printf("GetTokenMarket: error=%v\n", tokenMarketErr)
 	} else {
@@ -169,6 +189,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 			fmt.Printf("GetPool: parse error=%v\n", parseErr)
 		} else {
 			gotPool, getPoolErr := r.client.GetPool(ctx, market.GetPoolRequest{PoolAddress: poolKey})
+			r.printDebug("GetPool")
 			if getPoolErr != nil {
 				fmt.Printf("GetPool: error=%v\n", getPoolErr)
 			} else {
@@ -187,6 +208,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		quoteMint, quoteErr := ParsePublicKey(pool.QuoteMint)
 		if baseErr == nil && quoteErr == nil {
 			byPair, pairErr := r.client.FindPoolsByPair(ctx, baseMint, quoteMint)
+			r.printDebug("FindPoolsByPair")
 			if pairErr != nil {
 				fmt.Printf("FindPoolsByPair: error=%v\n", pairErr)
 			} else {
@@ -211,6 +233,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	}
 	byProtocol, byProtocolErr := r.client.FindPoolsByProtocol(ctx, mint, protocol)
+	r.printDebug("FindPoolsByProtocol")
 	if byProtocolErr != nil {
 		fmt.Printf("FindPoolsByProtocol(%s): error=%v\n", protocol, byProtocolErr)
 	} else {
@@ -219,6 +242,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 
 	if pool != nil && marketResp != nil {
 		metricsFromPool, metricsErr := r.client.ComputePoolMetrics(ctx, pool, marketResp.TotalSupply, marketResp.CirculatingSupply)
+		r.printDebug("ComputePoolMetrics")
 		if metricsErr != nil {
 			fmt.Printf("ComputePoolMetrics: error=%v\n", metricsErr)
 		} else {
@@ -230,6 +254,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 
 	if pool != nil {
 		tokenMetrics, tokenMetricsErr := r.client.ComputeTokenMetricsFromPool(ctx, mint, pool)
+		r.printDebug("ComputeTokenMetricsFromPool")
 		if tokenMetricsErr != nil {
 			fmt.Printf("ComputeTokenMetricsFromPool: error=%v\n", tokenMetricsErr)
 		} else {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/gagliardetto/solana-go"
 	"github.com/shopspring/decimal"
@@ -132,7 +133,7 @@ func discoverRaydiumPoolsByMint(ctx context.Context, mint solana.PublicKey) ([]*
 	q.Set("page", "1")
 	endpoint := raydiumPoolsByMintURL + "?" + q.Encode()
 
-	body, err := fetchJSON(ctx, endpoint)
+	body, err := fetchJSON(ctx, endpoint, "raydium", "pools_by_mint")
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +228,7 @@ type dexScreenerPair struct {
 }
 
 func discoverDexScreenerPoolsByMint(ctx context.Context, mint solana.PublicKey) ([]*market.Pool, error) {
-	body, err := fetchJSON(ctx, dexScreenerByMintURL+mint.String())
+	body, err := fetchJSON(ctx, dexScreenerByMintURL+mint.String(), "dexscreener", "tokens_by_mint")
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +326,10 @@ func marketTypeFromProtocol(protocol market.Protocol) market.MarketType {
 	}
 }
 
-func fetchJSON(ctx context.Context, endpoint string) ([]byte, error) {
+func fetchJSON(ctx context.Context, endpoint, source, operationType string) ([]byte, error) {
+	if recorder := reqdebug.FromContext(ctx); recorder != nil {
+		recorder.RecordAPI(source, operationType)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err

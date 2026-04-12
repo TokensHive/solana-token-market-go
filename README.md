@@ -67,6 +67,7 @@ Run the unified examples CLI:
 
 ```bash
 go run ./examples -cmd interactive
+go run ./examples -cmd batch-all -debug
 ```
 
 Direct commands:
@@ -82,6 +83,17 @@ Legacy entry points are still available:
 - `go run ./examples/resolve_pools`
 - `go run ./examples/get_token_market`
 - `go run ./examples/get_pool`
+
+SDK option for request debug telemetry:
+
+```go
+client, err := market.NewClient(
+    market.WithDebugRequests(true),
+)
+```
+
+When enabled, each public API call records categorized request usage in debug metadata
+(`rpc` by operation type, `api` by source + operation type), and the examples CLI prints it.
 
 To enable default parser registrations explicitly (opt-in):
 

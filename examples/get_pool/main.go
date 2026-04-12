@@ -16,7 +16,7 @@ func main() {
 	timeoutFlag := flag.Duration("timeout", 30*time.Second, "Request timeout")
 	flag.Parse()
 
-	runner, err := examplecli.NewRunner(*rpcURLFlag)
+	runner, err := examplecli.NewRunner(*rpcURLFlag, false)
 	if err != nil {
 		exitErr(err)
 	}
