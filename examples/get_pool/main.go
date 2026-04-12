@@ -2,40 +2,34 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"os"
+	"time"
 
-	"github.com/TokensHive/solana-token-market-go/sdk/discovery"
-	"github.com/TokensHive/solana-token-market-go/sdk/market"
-	"github.com/TokensHive/solana-token-market-go/sdk/parser"
-	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
-	"github.com/gagliardetto/solana-go"
+	"github.com/TokensHive/solana-token-market-go/examples/internal/examplecli"
 )
 
 func main() {
-	rpcClient := rpc.NewSolanaRPCClient("https://api.mainnet-beta.solana.com")
-	engine := discovery.NewEngine(rpcClient, parser.NewNoopAdapter())
-	client, err := market.NewClient(
-		market.WithRPCClient(rpcClient),
-		market.WithParserAdapter(parser.NewNoopAdapter()),
-		market.WithDiscoveryEngine(engine),
-	)
+	poolFlag := flag.String("pool", "6PiyjiAPkp2KdZtqkyQYzVsD1Prv7t8v4TaYd8ip4YFd", "Pool address")
+	rpcURLFlag := flag.String("rpc", "https://api.mainnet-beta.solana.com", "Solana RPC URL")
+	timeoutFlag := flag.Duration("timeout", 30*time.Second, "Request timeout")
+	flag.Parse()
+
+	runner, err := examplecli.NewRunner(*rpcURLFlag)
 	if err != nil {
-		panic(err)
+		exitErr(err)
 	}
-	solMint := solana.MustPublicKeyFromBase58("So11111111111111111111111111111111111111112")
-	resolved, err := client.ResolvePools(context.Background(), market.ResolvePoolsRequest{
-		Mint:          solMint,
-		SelectPrimary: true,
-	})
-	if err != nil || len(resolved.Pools) == 0 {
-		fmt.Println("no pools found for mint:", solMint.String())
-		return
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeoutFlag)
+	defer cancel()
+
+	if err := runner.GetPool(ctx, *poolFlag); err != nil {
+		exitErr(err)
 	}
-	pool := solana.MustPublicKeyFromBase58(resolved.Pools[0].Address)
-	p, err := client.GetPool(context.Background(), market.GetPoolRequest{PoolAddress: pool})
-	if err != nil {
-		fmt.Println("not found:", err)
-		return
-	}
-	fmt.Printf("pool=%s protocol=%s\n", p.Address, p.Protocol)
+}
+
+func exitErr(err error) {
+	fmt.Fprintln(os.Stderr, "error:", err)
+	os.Exit(1)
 }

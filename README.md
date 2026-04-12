@@ -60,10 +60,25 @@ Policy:
 
 ## Usage
 
-See examples:
-- `examples/resolve_pools`
-- `examples/get_token_market`
-- `examples/get_pool`
+Run the unified examples CLI:
+
+```bash
+go run ./examples -cmd interactive
+```
+
+Direct commands:
+
+```bash
+go run ./examples -cmd resolve-pools -mint 3y6kjbdG3ULceQMuJh3RWz68bGoEZ3U1YBeJyXbJpump
+go run ./examples -cmd get-token-market -mint 9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump
+go run ./examples -cmd all-methods -mint Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump
+go run ./examples -cmd batch-all
+```
+
+Legacy entry points are still available:
+- `go run ./examples/resolve_pools`
+- `go run ./examples/get_token_market`
+- `go run ./examples/get_pool`
 
 To enable default parser registrations explicitly (opt-in):
 

@@ -52,9 +52,11 @@ func (e *Engine) Discover(ctx context.Context, req market.DiscoveryRequest) ([]*
 	meta := map[string]any{"layers": []string{"deterministic", "parser_evidence", "rpc_fallback", "api_optional"}}
 	adapters := e.registry.List(req.Protocols)
 	all := make([]*market.Pool, 0, 8)
+	adapterErrs := make([]error, 0, len(adapters))
 	for _, a := range adapters {
 		pools, err := a.Discover(ctx, req)
 		if err != nil && !errors.Is(err, parser.ErrNoEvidence) {
+			adapterErrs = append(adapterErrs, err)
 			continue
 		}
 		all = append(all, pools...)
@@ -82,15 +84,25 @@ func (e *Engine) Discover(ctx context.Context, req market.DiscoveryRequest) ([]*
 		q = &v
 	}
 	ranked := RankPools(all, req.Mint.String(), q)
+	if len(ranked) == 0 && len(adapterErrs) > 0 {
+		return nil, meta, market.NewError(market.ErrCodeRPC, "discovery failed across all adapters", errors.Join(adapterErrs...))
+	}
 	return ranked, meta, nil
 }
 
 func (e *Engine) FindByPoolAddress(ctx context.Context, addr solana.PublicKey) ([]*market.Pool, map[string]any, error) {
+	adapterErrs := make([]error, 0, len(e.registry.List(nil)))
 	for _, a := range e.registry.List(nil) {
 		p, err := a.GetByAddress(ctx, addr)
 		if err == nil && p != nil {
 			return []*market.Pool{p}, map[string]any{"source": "adapter"}, nil
 		}
+		if err != nil {
+			adapterErrs = append(adapterErrs, err)
+		}
+	}
+	if len(adapterErrs) > 0 {
+		return nil, map[string]any{}, market.NewError(market.ErrCodeRPC, "pool lookup failed across all adapters", errors.Join(adapterErrs...))
 	}
 	return nil, map[string]any{}, nil
 }
