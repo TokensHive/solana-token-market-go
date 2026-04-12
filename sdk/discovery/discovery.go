@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -85,7 +86,11 @@ func (e *Engine) Discover(ctx context.Context, req market.DiscoveryRequest) ([]*
 	}
 	ranked := RankPools(all, req.Mint.String(), q)
 	if len(ranked) == 0 && len(adapterErrs) > 0 {
-		return nil, meta, market.NewError(market.ErrCodeRPC, "discovery failed across all adapters", errors.Join(adapterErrs...))
+		return nil, meta, market.NewError(
+			market.ErrCodeRPC,
+			fmt.Sprintf("no pools found and %d/%d adapters encountered errors", len(adapterErrs), len(adapters)),
+			errors.Join(adapterErrs...),
+		)
 	}
 	return ranked, meta, nil
 }
@@ -102,7 +107,11 @@ func (e *Engine) FindByPoolAddress(ctx context.Context, addr solana.PublicKey) (
 		}
 	}
 	if len(adapterErrs) > 0 {
-		return nil, map[string]any{}, market.NewError(market.ErrCodeRPC, "pool lookup failed across all adapters", errors.Join(adapterErrs...))
+		return nil, map[string]any{}, market.NewError(
+			market.ErrCodeRPC,
+			fmt.Sprintf("pool lookup failed for address %s: %d adapters returned errors", addr.String(), len(adapterErrs)),
+			errors.Join(adapterErrs...),
+		)
 	}
 	return nil, map[string]any{}, nil
 }
