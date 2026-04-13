@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
@@ -72,7 +73,7 @@ func (a *Adapter) deriveBondingCurve(ctx context.Context, mint solana.PublicKey)
 		Protocol:          market.ProtocolPumpfun,
 		MarketType:        market.MarketTypeBondingCurve,
 		BaseMint:          mint.String(),
-		QuoteMint:         solana.SolMint.String(),
+		QuoteMint:         pubkeyx.WrappedSOLMintStr,
 		BaseReserve:       state.TokenReserve,
 		QuoteReserve:      state.SOLReserve,
 		PriceOfTokenInSOL: price,

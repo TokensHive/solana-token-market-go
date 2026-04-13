@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
@@ -38,7 +39,7 @@ func (a *Adapter) Discover(ctx context.Context, req market.DiscoveryRequest) ([]
 			continue
 		}
 		price := DecodeWhirlpoolPrice(acc.Data)
-		p := &market.Pool{Address: pk.String(), Protocol: market.ProtocolOrcaWhirlpool, MarketType: market.MarketTypeConcentratedLiquidity, BaseMint: req.Mint.String(), QuoteMint: solana.SolMint.String(), PriceOfTokenInSOL: price, LiquidityInSOL: decimal.Zero, LiquidityInQuote: decimal.Zero, IsVerified: true, IsActive: true, LastUpdatedAt: time.Now().UTC(), Metadata: map[string]any{"estimated_liquidity": true}}
+		p := &market.Pool{Address: pk.String(), Protocol: market.ProtocolOrcaWhirlpool, MarketType: market.MarketTypeConcentratedLiquidity, BaseMint: req.Mint.String(), QuoteMint: pubkeyx.WrappedSOLMintStr, PriceOfTokenInSOL: price, LiquidityInSOL: decimal.Zero, LiquidityInQuote: decimal.Zero, IsVerified: true, IsActive: true, LastUpdatedAt: time.Now().UTC(), Metadata: map[string]any{"estimated_liquidity": true}}
 		out = append(out, p)
 	}
 	if len(out) == 0 {
@@ -52,6 +53,6 @@ func (a *Adapter) GetByAddress(ctx context.Context, pool solana.PublicKey) (*mar
 	if err != nil || acc == nil || !acc.Exists {
 		return nil, err
 	}
-	p := &market.Pool{Address: pool.String(), Protocol: market.ProtocolOrcaWhirlpool, MarketType: market.MarketTypeConcentratedLiquidity, QuoteMint: solana.SolMint.String(), PriceOfTokenInSOL: DecodeWhirlpoolPrice(acc.Data), IsVerified: true, IsActive: true, LastUpdatedAt: time.Now().UTC(), Metadata: map[string]any{"estimated_liquidity": true}}
+	p := &market.Pool{Address: pool.String(), Protocol: market.ProtocolOrcaWhirlpool, MarketType: market.MarketTypeConcentratedLiquidity, QuoteMint: pubkeyx.WrappedSOLMintStr, PriceOfTokenInSOL: DecodeWhirlpoolPrice(acc.Data), IsVerified: true, IsActive: true, LastUpdatedAt: time.Now().UTC(), Metadata: map[string]any{"estimated_liquidity": true}}
 	return p, nil
 }

@@ -126,10 +126,13 @@ type GetPoolRequest struct {
 }
 
 type GetTokenMarketRequest struct {
-	Mint          solana.PublicKey
-	QuoteMint     *solana.PublicKey
-	Protocols     []Protocol
-	DiscoveryMode DiscoveryMode
+	Mint              solana.PublicKey
+	QuoteMint         *solana.PublicKey
+	Protocols         []Protocol
+	DiscoveryMode     DiscoveryMode
+	IncludeInactive   bool
+	IncludeUnverified bool
+	DirectSOLOnly     bool
 }
 
 type MarketMetadata struct {
@@ -160,6 +163,7 @@ type DiscoveryRequest struct {
 	DiscoveryMode     DiscoveryMode
 	PoolAddresses     []solana.PublicKey
 	DirectSOLOnly     bool
+	PreferRaydiumAPI  bool
 }
 
 type DiscoveryEngine interface {

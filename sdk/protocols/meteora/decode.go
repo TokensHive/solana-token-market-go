@@ -1,6 +1,7 @@
 package meteora
 
 import (
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/gagliardetto/solana-go"
 	"github.com/shopspring/decimal"
@@ -25,5 +26,5 @@ func DecodePool(protocol market.Protocol, mtype market.MarketType, addr, mint so
 		meta["estimated_liquidity"] = true
 	}
 	// Placeholder byte-derived decoding is intentionally unverified.
-	return &market.Pool{Address: addr.String(), Protocol: protocol, MarketType: mtype, BaseMint: mint.String(), QuoteMint: solana.SolMint.String(), BaseReserve: base, QuoteReserve: quote, PriceOfTokenInSOL: price, LiquidityInSOL: liq, LiquidityInQuote: liq, IsVerified: false, IsActive: true, Metadata: meta}
+	return &market.Pool{Address: addr.String(), Protocol: protocol, MarketType: mtype, BaseMint: mint.String(), QuoteMint: pubkeyx.WrappedSOLMintStr, BaseReserve: base, QuoteReserve: quote, PriceOfTokenInSOL: price, LiquidityInSOL: liq, LiquidityInQuote: liq, IsVerified: false, IsActive: true, Metadata: meta}
 }
