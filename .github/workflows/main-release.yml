@@ -78,9 +78,12 @@ jobs:
             if grep -q "^TELEMETRY_BEGIN" "${log_file}" 2>/dev/null; then
               total_line="$(sed -n '/^TELEMETRY_BEGIN/,/^TELEMETRY_END/p' "${log_file}" | grep "^TELEMETRY_TOTAL" || true)"
               if [[ -n "${total_line}" ]]; then
-                sdk_ms="$(echo "${total_line}"    | grep -o 'duration_ms=[0-9]*' | cut -d= -f2)"
-                rpc_total="$(echo "${total_line}" | grep -o 'rpc=[0-9]*'         | cut -d= -f2)"
-                api_total="$(echo "${total_line}" | grep -o 'api=[0-9]*'         | cut -d= -f2)"
+                read -r sdk_ms rpc_total api_total < <(echo "${total_line}" | awk '{
+                  for (i=1;i<=NF;i++) { split($i,a,"=");
+                    if (a[1]=="duration_ms") ms=a[2];
+                    else if (a[1]=="rpc") rpc=a[2];
+                    else if (a[1]=="api") api=a[2]; }
+                  print ms, rpc, api }')
               fi
             fi
 
@@ -97,17 +100,23 @@ jobs:
                 while IFS= read -r line; do
                   case "${line}" in
                     op=*)
-                      op="$(echo "${line}"  | grep -o 'op=[^ ]*'          | cut -d= -f2)"
-                      st="$(echo "${line}"  | grep -o 'status=[^ ]*'      | cut -d= -f2)"
-                      ms="$(echo "${line}"  | grep -o 'duration_ms=[0-9]*'| cut -d= -f2)"
-                      rpc="$(echo "${line}" | grep -o 'rpc=[0-9]*'        | cut -d= -f2)"
-                      api="$(echo "${line}" | grep -o 'api=[0-9]*'        | cut -d= -f2)"
+                      read -r op st ms rpc api < <(echo "${line}" | awk '{
+                        for (i=1;i<=NF;i++) { split($i,a,"=");
+                          if (a[1]=="op") op=a[2];
+                          else if (a[1]=="status") st=a[2];
+                          else if (a[1]=="duration_ms") ms=a[2];
+                          else if (a[1]=="rpc") rpc=a[2];
+                          else if (a[1]=="api") api=a[2]; }
+                        print op, st, ms, rpc, api }')
                       echo "| ${op} | ${st} | ${ms} | ${rpc} | ${api} |"
                       ;;
                     TELEMETRY_TOTAL*)
-                      ms="$(echo "${line}"  | grep -o 'duration_ms=[0-9]*'| cut -d= -f2)"
-                      rpc="$(echo "${line}" | grep -o 'rpc=[0-9]*'        | cut -d= -f2)"
-                      api="$(echo "${line}" | grep -o 'api=[0-9]*'        | cut -d= -f2)"
+                      read -r ms rpc api < <(echo "${line}" | awk '{
+                        for (i=1;i<=NF;i++) { split($i,a,"=");
+                          if (a[1]=="duration_ms") ms=a[2];
+                          else if (a[1]=="rpc") rpc=a[2];
+                          else if (a[1]=="api") api=a[2]; }
+                        print ms, rpc, api }')
                       echo "| **Total** | — | **${ms}** | **${rpc}** | **${api}** |"
                       ;;
                   esac
