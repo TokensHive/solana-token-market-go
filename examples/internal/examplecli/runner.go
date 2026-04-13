@@ -63,6 +63,25 @@ type callEntry struct {
 
 func skipEntry(name string) callEntry { return callEntry{name: name, status: "SKIP"} }
 
+// printDebugMap formats and prints a single debug line for the given label and
+// debug map returned by LastRequestDebug.
+func printDebugMap(label string, debug map[string]any) {
+	if len(debug) == 0 {
+		fmt.Printf("[debug] %s: no request stats\n", label)
+		return
+	}
+	ms, _ := debug["duration_ms"].(int64)
+	fmt.Printf("[debug] %s: total=%dms | rpc=%s | api=%s\n",
+		label, ms, formatRPCDebug(debug), formatAPIDebug(debug))
+}
+
+func (r *Runner) printDebug(label string) {
+	if !r.debug {
+		return
+	}
+	printDebugMap(label, r.client.LastRequestDebug())
+}
+
 // captureCallStats reads LastRequestDebug, prints a formatted debug line, and
 // returns a callEntry.  ok indicates whether the SDK call succeeded.
 func (r *Runner) captureCallStats(name string, ok bool) callEntry {
@@ -75,8 +94,8 @@ func (r *Runner) captureCallStats(name string, ok bool) callEntry {
 		return e
 	}
 	debug := r.client.LastRequestDebug()
+	printDebugMap(name, debug)
 	if len(debug) == 0 {
-		fmt.Printf("[debug] %s: no request stats\n", name)
 		return e
 	}
 	if ms, _ := debug["duration_ms"].(int64); ms > 0 {
@@ -92,23 +111,7 @@ func (r *Runner) captureCallStats(name string, ok bool) callEntry {
 			e.apiTotal = t
 		}
 	}
-	fmt.Printf("[debug] %s: total=%dms | rpc=%s | api=%s\n",
-		name, e.durationMS, formatRPCDebug(debug), formatAPIDebug(debug))
 	return e
-}
-
-func (r *Runner) printDebug(label string) {
-	if !r.debug {
-		return
-	}
-	debug := r.client.LastRequestDebug()
-	if len(debug) == 0 {
-		fmt.Printf("[debug] %s: no request stats\n", label)
-		return
-	}
-	ms, _ := debug["duration_ms"].(int64)
-	fmt.Printf("[debug] %s: total=%dms | rpc=%s | api=%s\n",
-		label, ms, formatRPCDebug(debug), formatAPIDebug(debug))
 }
 
 // printTelemetryBlock emits a machine-parseable TELEMETRY block to stdout so
