@@ -78,9 +78,9 @@ jobs:
             if grep -q "^TELEMETRY_BEGIN" "${log_file}" 2>/dev/null; then
               total_line="$(sed -n '/^TELEMETRY_BEGIN/,/^TELEMETRY_END/p' "${log_file}" | grep "^TELEMETRY_TOTAL" || true)"
               if [[ -n "${total_line}" ]]; then
-                sdk_ms="$(echo "${total_line}"   | grep -o 'duration_ms=[0-9]*' | cut -d= -f2)"
-                rpc_total="$(echo "${total_line}" | grep -o ' rpc=[0-9]*'        | grep -o '[0-9]*')"
-                api_total="$(echo "${total_line}" | grep -o ' api=[0-9]*'        | grep -o '[0-9]*')"
+                sdk_ms="$(echo "${total_line}"    | grep -o 'duration_ms=[0-9]*' | cut -d= -f2)"
+                rpc_total="$(echo "${total_line}" | grep -o 'rpc=[0-9]*'         | cut -d= -f2)"
+                api_total="$(echo "${total_line}" | grep -o 'api=[0-9]*'         | cut -d= -f2)"
               fi
             fi
 
@@ -100,14 +100,14 @@ jobs:
                       op="$(echo "${line}"  | grep -o 'op=[^ ]*'          | cut -d= -f2)"
                       st="$(echo "${line}"  | grep -o 'status=[^ ]*'      | cut -d= -f2)"
                       ms="$(echo "${line}"  | grep -o 'duration_ms=[0-9]*'| cut -d= -f2)"
-                      rpc="$(echo "${line}" | grep -o ' rpc=[0-9]*'       | grep -o '[0-9]*')"
-                      api="$(echo "${line}" | grep -o ' api=[0-9]*'       | grep -o '[0-9]*')"
+                      rpc="$(echo "${line}" | grep -o 'rpc=[0-9]*'        | cut -d= -f2)"
+                      api="$(echo "${line}" | grep -o 'api=[0-9]*'        | cut -d= -f2)"
                       echo "| ${op} | ${st} | ${ms} | ${rpc} | ${api} |"
                       ;;
                     TELEMETRY_TOTAL*)
                       ms="$(echo "${line}"  | grep -o 'duration_ms=[0-9]*'| cut -d= -f2)"
-                      rpc="$(echo "${line}" | grep -o ' rpc=[0-9]*'       | grep -o '[0-9]*')"
-                      api="$(echo "${line}" | grep -o ' api=[0-9]*'       | grep -o '[0-9]*')"
+                      rpc="$(echo "${line}" | grep -o 'rpc=[0-9]*'        | cut -d= -f2)"
+                      api="$(echo "${line}" | grep -o 'api=[0-9]*'        | cut -d= -f2)"
                       echo "| **Total** | — | **${ms}** | **${rpc}** | **${api}** |"
                       ;;
                   esac
