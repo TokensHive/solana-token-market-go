@@ -61,7 +61,7 @@ type callEntry struct {
 	apiTotal   int
 }
 
-func skipEntry(name string) callEntry { return callEntry{name: name, status: "SKIP"} }
+func newSkipEntry(name string) callEntry { return callEntry{name: name, status: "SKIP"} }
 
 // printDebugMap formats and prints a single debug line for the given label and
 // debug map returned by LastRequestDebug.
@@ -313,7 +313,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		poolKey, parseErr := ParsePublicKey(resolved.Pools[0].Address)
 		if parseErr != nil {
 			fmt.Printf("GetPool: parse error=%v\n", parseErr)
-			calls = append(calls, skipEntry("GetPool"))
+			calls = append(calls, newSkipEntry("GetPool"))
 		} else {
 			gotPool, getPoolErr := r.client.GetPool(ctx, market.GetPoolRequest{PoolAddress: poolKey})
 			calls = append(calls, r.captureCallStats("GetPool", getPoolErr == nil))
@@ -326,10 +326,10 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	} else if pool == nil {
 		fmt.Println("GetPool: skipped (no resolved pools)")
-		calls = append(calls, skipEntry("GetPool"))
+		calls = append(calls, newSkipEntry("GetPool"))
 	} else {
 		fmt.Printf("GetPool: skipped (using resolved primary pool %s)\n", pool.Address)
-		calls = append(calls, skipEntry("GetPool"))
+		calls = append(calls, newSkipEntry("GetPool"))
 	}
 
 	if pool != nil {
@@ -345,11 +345,11 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 			}
 		} else {
 			fmt.Printf("FindPoolsByPair: skipped (base parse err=%v quote parse err=%v)\n", baseErr, quoteErr)
-			calls = append(calls, skipEntry("FindPoolsByPair"))
+			calls = append(calls, newSkipEntry("FindPoolsByPair"))
 		}
 	} else {
 		fmt.Println("FindPoolsByPair: skipped (no pool)")
-		calls = append(calls, skipEntry("FindPoolsByPair"))
+		calls = append(calls, newSkipEntry("FindPoolsByPair"))
 	}
 
 	protocol, protocolErr := ParseProtocol(protocolStr)
@@ -381,7 +381,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	} else {
 		fmt.Println("ComputePoolMetrics: skipped (missing pool or market response)")
-		calls = append(calls, skipEntry("ComputePoolMetrics"))
+		calls = append(calls, newSkipEntry("ComputePoolMetrics"))
 	}
 
 	if pool != nil {
@@ -394,7 +394,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	} else {
 		fmt.Println("ComputeTokenMetricsFromPool: skipped (no pool)")
-		calls = append(calls, skipEntry("ComputeTokenMetricsFromPool"))
+		calls = append(calls, newSkipEntry("ComputeTokenMetricsFromPool"))
 	}
 
 	if resolved != nil {
