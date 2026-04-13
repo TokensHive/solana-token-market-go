@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/discovery"
@@ -51,16 +52,135 @@ func NewRunner(rpcURL string, debug bool) (*Runner, error) {
 	return &Runner{client: client, debug: debug}, nil
 }
 
+// callEntry holds telemetry for a single SDK method call within RunAllPublicMethods.
+type callEntry struct {
+	name       string
+	status     string // "PASS", "FAIL", or "SKIP"
+	durationMS int64
+	rpcTotal   int
+	apiTotal   int
+}
+
+func skipEntry(name string) callEntry { return callEntry{name: name, status: "SKIP"} }
+
+// captureCallStats reads LastRequestDebug, prints a formatted debug line, and
+// returns a callEntry.  ok indicates whether the SDK call succeeded.
+func (r *Runner) captureCallStats(name string, ok bool) callEntry {
+	status := "PASS"
+	if !ok {
+		status = "FAIL"
+	}
+	e := callEntry{name: name, status: status}
+	if !r.debug {
+		return e
+	}
+	debug := r.client.LastRequestDebug()
+	if len(debug) == 0 {
+		fmt.Printf("[debug] %s: no request stats\n", name)
+		return e
+	}
+	if ms, _ := debug["duration_ms"].(int64); ms > 0 {
+		e.durationMS = ms
+	}
+	if rpc, _ := debug["rpc"].(map[string]any); rpc != nil {
+		if t, _ := rpc["total"].(int); t > 0 {
+			e.rpcTotal = t
+		}
+	}
+	if api, _ := debug["api"].(map[string]any); api != nil {
+		if t, _ := api["total"].(int); t > 0 {
+			e.apiTotal = t
+		}
+	}
+	fmt.Printf("[debug] %s: total=%dms | rpc=%s | api=%s\n",
+		name, e.durationMS, formatRPCDebug(debug), formatAPIDebug(debug))
+	return e
+}
+
 func (r *Runner) printDebug(label string) {
 	if !r.debug {
 		return
 	}
 	debug := r.client.LastRequestDebug()
 	if len(debug) == 0 {
-		fmt.Printf("%s debug: no request stats\n", label)
+		fmt.Printf("[debug] %s: no request stats\n", label)
 		return
 	}
-	fmt.Printf("%s debug: %v\n", label, debug)
+	ms, _ := debug["duration_ms"].(int64)
+	fmt.Printf("[debug] %s: total=%dms | rpc=%s | api=%s\n",
+		label, ms, formatRPCDebug(debug), formatAPIDebug(debug))
+}
+
+// printTelemetryBlock emits a machine-parseable TELEMETRY block to stdout so
+// the CI benchmark script can extract per-call and aggregate metrics.
+func (r *Runner) printTelemetryBlock(calls []callEntry) {
+	if !r.debug {
+		return
+	}
+	var totalMS int64
+	totalRPC := 0
+	totalAPI := 0
+	fmt.Println("TELEMETRY_BEGIN")
+	for _, e := range calls {
+		fmt.Printf("op=%s status=%s duration_ms=%d rpc=%d api=%d\n",
+			e.name, e.status, e.durationMS, e.rpcTotal, e.apiTotal)
+		totalMS += e.durationMS
+		totalRPC += e.rpcTotal
+		totalAPI += e.apiTotal
+	}
+	fmt.Printf("TELEMETRY_TOTAL duration_ms=%d rpc=%d api=%d\n", totalMS, totalRPC, totalAPI)
+	fmt.Println("TELEMETRY_END")
+}
+
+func formatRPCDebug(debug map[string]any) string {
+	rpc, _ := debug["rpc"].(map[string]any)
+	if rpc == nil {
+		return "0"
+	}
+	total, _ := rpc["total"].(int)
+	if total == 0 {
+		return "0"
+	}
+	byType, _ := rpc["by_operation_type"].(map[string]int)
+	durByType, _ := rpc["duration_by_type_ms"].(map[string]int64)
+	if bd := formatBreakdown(byType, durByType); bd != "" {
+		return fmt.Sprintf("%d (%s)", total, bd)
+	}
+	return fmt.Sprintf("%d", total)
+}
+
+func formatAPIDebug(debug map[string]any) string {
+	api, _ := debug["api"].(map[string]any)
+	if api == nil {
+		return "0"
+	}
+	total, _ := api["total"].(int)
+	if total == 0 {
+		return "0"
+	}
+	bySource, _ := api["by_source"].(map[string]int)
+	durBySource, _ := api["duration_by_source_ms"].(map[string]int64)
+	if bd := formatBreakdown(bySource, durBySource); bd != "" {
+		return fmt.Sprintf("%d (%s)", total, bd)
+	}
+	return fmt.Sprintf("%d", total)
+}
+
+// formatBreakdown renders a sorted "key:count@durationms" breakdown string.
+func formatBreakdown(byKey map[string]int, durByKey map[string]int64) string {
+	if len(byKey) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(byKey))
+	for k := range byKey {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s:%d@%dms", k, byKey[k], durByKey[k]))
+	}
+	return strings.Join(parts, ",")
 }
 
 func ParsePublicKey(value string) (solana.PublicKey, error) {
@@ -152,8 +272,11 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		return err
 	}
 	fmt.Printf("== Running public market methods for mint=%s ==\n", mint.String())
+
+	var calls []callEntry
+
 	resolved, resolvePoolsErr := r.client.ResolvePools(ctx, market.ResolvePoolsRequest{Mint: mint, IncludeUnverified: true, SelectPrimary: true})
-	r.printDebug("ResolvePools")
+	calls = append(calls, r.captureCallStats("ResolvePools", resolvePoolsErr == nil))
 	if resolvePoolsErr != nil {
 		fmt.Printf("ResolvePools: error=%v\n", resolvePoolsErr)
 	} else {
@@ -164,7 +287,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	}
 
 	poolsByMint, byMintErr := r.client.FindPoolsByMint(ctx, mint)
-	r.printDebug("FindPoolsByMint")
+	calls = append(calls, r.captureCallStats("FindPoolsByMint", byMintErr == nil))
 	if byMintErr != nil {
 		fmt.Printf("FindPoolsByMint: error=%v\n", byMintErr)
 	} else {
@@ -172,7 +295,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	}
 
 	marketResp, tokenMarketErr := r.client.GetTokenMarket(ctx, market.GetTokenMarketRequest{Mint: mint, IncludeUnverified: true})
-	r.printDebug("GetTokenMarket")
+	calls = append(calls, r.captureCallStats("GetTokenMarket", tokenMarketErr == nil))
 	if tokenMarketErr != nil {
 		fmt.Printf("GetTokenMarket: error=%v\n", tokenMarketErr)
 	} else {
@@ -187,9 +310,10 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		poolKey, parseErr := ParsePublicKey(resolved.Pools[0].Address)
 		if parseErr != nil {
 			fmt.Printf("GetPool: parse error=%v\n", parseErr)
+			calls = append(calls, skipEntry("GetPool"))
 		} else {
 			gotPool, getPoolErr := r.client.GetPool(ctx, market.GetPoolRequest{PoolAddress: poolKey})
-			r.printDebug("GetPool")
+			calls = append(calls, r.captureCallStats("GetPool", getPoolErr == nil))
 			if getPoolErr != nil {
 				fmt.Printf("GetPool: error=%v\n", getPoolErr)
 			} else {
@@ -199,8 +323,10 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	} else if pool == nil {
 		fmt.Println("GetPool: skipped (no resolved pools)")
+		calls = append(calls, skipEntry("GetPool"))
 	} else {
 		fmt.Printf("GetPool: skipped (using resolved primary pool %s)\n", pool.Address)
+		calls = append(calls, skipEntry("GetPool"))
 	}
 
 	if pool != nil {
@@ -208,7 +334,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		quoteMint, quoteErr := ParsePublicKey(pool.QuoteMint)
 		if baseErr == nil && quoteErr == nil {
 			byPair, pairErr := r.client.FindPoolsByPair(ctx, baseMint, quoteMint)
-			r.printDebug("FindPoolsByPair")
+			calls = append(calls, r.captureCallStats("FindPoolsByPair", pairErr == nil))
 			if pairErr != nil {
 				fmt.Printf("FindPoolsByPair: error=%v\n", pairErr)
 			} else {
@@ -216,9 +342,11 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 			}
 		} else {
 			fmt.Printf("FindPoolsByPair: skipped (base parse err=%v quote parse err=%v)\n", baseErr, quoteErr)
+			calls = append(calls, skipEntry("FindPoolsByPair"))
 		}
 	} else {
 		fmt.Println("FindPoolsByPair: skipped (no pool)")
+		calls = append(calls, skipEntry("FindPoolsByPair"))
 	}
 
 	protocol, protocolErr := ParseProtocol(protocolStr)
@@ -233,7 +361,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	}
 	byProtocol, byProtocolErr := r.client.FindPoolsByProtocol(ctx, mint, protocol)
-	r.printDebug("FindPoolsByProtocol")
+	calls = append(calls, r.captureCallStats("FindPoolsByProtocol", byProtocolErr == nil))
 	if byProtocolErr != nil {
 		fmt.Printf("FindPoolsByProtocol(%s): error=%v\n", protocol, byProtocolErr)
 	} else {
@@ -242,7 +370,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 
 	if pool != nil && marketResp != nil {
 		metricsFromPool, metricsErr := r.client.ComputePoolMetrics(ctx, pool, marketResp.TotalSupply, marketResp.CirculatingSupply)
-		r.printDebug("ComputePoolMetrics")
+		calls = append(calls, r.captureCallStats("ComputePoolMetrics", metricsErr == nil))
 		if metricsErr != nil {
 			fmt.Printf("ComputePoolMetrics: error=%v\n", metricsErr)
 		} else {
@@ -250,11 +378,12 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	} else {
 		fmt.Println("ComputePoolMetrics: skipped (missing pool or market response)")
+		calls = append(calls, skipEntry("ComputePoolMetrics"))
 	}
 
 	if pool != nil {
 		tokenMetrics, tokenMetricsErr := r.client.ComputeTokenMetricsFromPool(ctx, mint, pool)
-		r.printDebug("ComputeTokenMetricsFromPool")
+		calls = append(calls, r.captureCallStats("ComputeTokenMetricsFromPool", tokenMetricsErr == nil))
 		if tokenMetricsErr != nil {
 			fmt.Printf("ComputeTokenMetricsFromPool: error=%v\n", tokenMetricsErr)
 		} else {
@@ -262,6 +391,7 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 		}
 	} else {
 		fmt.Println("ComputeTokenMetricsFromPool: skipped (no pool)")
+		calls = append(calls, skipEntry("ComputeTokenMetricsFromPool"))
 	}
 
 	if resolved != nil {
@@ -274,6 +404,8 @@ func (r *Runner) RunAllPublicMethods(ctx context.Context, mintStr string, protoc
 	} else {
 		fmt.Println("SelectPrimaryPool: skipped (resolve failed)")
 	}
+
+	r.printTelemetryBlock(calls)
 
 	if resolvePoolsErr != nil && byMintErr != nil && tokenMarketErr != nil {
 		return fmt.Errorf(
