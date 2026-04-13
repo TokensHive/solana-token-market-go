@@ -328,12 +328,14 @@ func marketTypeFromProtocol(protocol market.Protocol) market.MarketType {
 
 func fetchJSON(ctx context.Context, endpoint, source, operationType string) ([]byte, error) {
 	recorder := reqdebug.FromContext(ctx)
-	startedAt := time.Now()
+	if recorder != nil {
+		startedAt := time.Now()
+		defer func() {
+			recorder.RecordAPI(source, operationType, time.Since(startedAt))
+		}()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		if recorder != nil {
-			recorder.RecordAPI(source, operationType, time.Since(startedAt))
-		}
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
@@ -341,9 +343,6 @@ func fetchJSON(ctx context.Context, endpoint, source, operationType string) ([]b
 
 	client := &http.Client{Timeout: 12 * time.Second}
 	resp, err := client.Do(req)
-	if recorder != nil {
-		recorder.RecordAPI(source, operationType, time.Since(startedAt))
-	}
 	if err != nil {
 		return nil, err
 	}
