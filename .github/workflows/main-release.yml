@@ -41,8 +41,10 @@ jobs:
             echo
             echo "Generated on: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
             echo
-            echo "| Mint | Status | Duration |"
-            echo "|---|---|---|"
+            echo "## Summary"
+            echo
+            echo "| Mint | Status | Duration | RPC Calls | API Calls | SDK ms |"
+            echo "|---|---|---|---|---|---|"
           } > "${report}"
 
           mapfile -t MINTS < <(awk 'NF {gsub(/[[:space:]]+/, "", $0); print $0}' .github/mint-tests.txt)
@@ -52,6 +54,10 @@ jobs:
           fi
           failures=0
           total=0
+
+          # Collect per-call detail sections to append after the summary table.
+          detail_file=".artifacts/benchmark-details.tmp"
+          > "${detail_file}"
 
           for mint in "${MINTS[@]}"; do
             total=$((total + 1))
@@ -64,12 +70,69 @@ jobs:
               failures=$((failures + 1))
             fi
             duration="$(( $(date +%s) - start ))s"
-            echo "| \`${mint}\` | ${status} | ${duration} |" >> "${report}"
+
+            # Parse TELEMETRY block written by the runner.
+            rpc_total="-"
+            api_total="-"
+            sdk_ms="-"
+            if grep -q "^TELEMETRY_BEGIN" "${log_file}" 2>/dev/null; then
+              total_line="$(sed -n '/^TELEMETRY_BEGIN/,/^TELEMETRY_END/p' "${log_file}" | grep "^TELEMETRY_TOTAL" || true)"
+              if [[ -n "${total_line}" ]]; then
+                read -r sdk_ms rpc_total api_total < <(echo "${total_line}" | awk '{
+                  for (i=1;i<=NF;i++) { split($i,a,"=");
+                    if (a[1]=="duration_ms") ms=a[2];
+                    else if (a[1]=="rpc") rpc=a[2];
+                    else if (a[1]=="api") api=a[2]; }
+                  print ms, rpc, api }')
+              fi
+            fi
+
+            echo "| \`${mint}\` | ${status} | ${duration} | ${rpc_total} | ${api_total} | ${sdk_ms} |" >> "${report}"
+
+            # Build per-call detail table for this mint.
+            {
+              echo
+              echo "### \`${mint}\` — ${status}"
+              echo
+              echo "| Call | Status | Duration (ms) | RPC Calls | API Calls |"
+              echo "| --- | --- | --- | --- | --- |"
+              if grep -q "^TELEMETRY_BEGIN" "${log_file}" 2>/dev/null; then
+                while IFS= read -r line; do
+                  case "${line}" in
+                    op=*)
+                      read -r op st ms rpc api < <(echo "${line}" | awk '{
+                        for (i=1;i<=NF;i++) { split($i,a,"=");
+                          if (a[1]=="op") op=a[2];
+                          else if (a[1]=="status") st=a[2];
+                          else if (a[1]=="duration_ms") ms=a[2];
+                          else if (a[1]=="rpc") rpc=a[2];
+                          else if (a[1]=="api") api=a[2]; }
+                        print op, st, ms, rpc, api }')
+                      echo "| ${op} | ${st} | ${ms} | ${rpc} | ${api} |"
+                      ;;
+                    TELEMETRY_TOTAL*)
+                      read -r ms rpc api < <(echo "${line}" | awk '{
+                        for (i=1;i<=NF;i++) { split($i,a,"=");
+                          if (a[1]=="duration_ms") ms=a[2];
+                          else if (a[1]=="rpc") rpc=a[2];
+                          else if (a[1]=="api") api=a[2]; }
+                        print ms, rpc, api }')
+                      echo "| **Total** | — | **${ms}** | **${rpc}** | **${api}** |"
+                      ;;
+                  esac
+                done < <(sed -n '/^TELEMETRY_BEGIN/,/^TELEMETRY_END/p' "${log_file}")
+              else
+                echo "| _(telemetry unavailable)_ | — | — | — | — |"
+              fi
+            } >> "${detail_file}"
           done
 
           {
             echo
             echo "Mint checks failed: ${failures}/${total}"
+            echo
+            echo "## Per-Call Telemetry"
+            cat "${detail_file}"
           } >> "${report}"
 
           cp "${report}" BENCHMARK.md
