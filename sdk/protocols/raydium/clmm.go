@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/gagliardetto/solana-go"
@@ -33,7 +34,7 @@ func (a *clmmAdapter) Discover(ctx context.Context, req market.DiscoveryRequest)
 			continue
 		}
 		price := DecodeCLMMPrice(acc.Data)
-		p := &market.Pool{Address: pk.String(), Protocol: market.ProtocolRaydiumCLMM, MarketType: market.MarketTypeConcentratedLiquidity, BaseMint: req.Mint.String(), QuoteMint: solana.SolMint.String(), PriceOfTokenInSOL: price, LiquidityInSOL: decimal.Zero, LiquidityInQuote: decimal.Zero, IsVerified: true, IsActive: true, LastUpdatedAt: time.Now().UTC(), Metadata: map[string]any{"estimated_liquidity": true}}
+		p := &market.Pool{Address: pk.String(), Protocol: market.ProtocolRaydiumCLMM, MarketType: market.MarketTypeConcentratedLiquidity, BaseMint: req.Mint.String(), QuoteMint: pubkeyx.WrappedSOLMintStr, PriceOfTokenInSOL: price, LiquidityInSOL: decimal.Zero, LiquidityInQuote: decimal.Zero, IsVerified: true, IsActive: true, LastUpdatedAt: time.Now().UTC(), Metadata: map[string]any{"estimated_liquidity": true}}
 		out = append(out, p)
 	}
 	if len(out) == 0 {

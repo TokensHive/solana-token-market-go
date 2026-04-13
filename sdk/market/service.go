@@ -5,6 +5,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
 	"github.com/gagliardetto/solana-go"
 	"github.com/shopspring/decimal"
 )
@@ -16,6 +18,8 @@ type Service struct {
 func NewService(cfg Config) *Service { return &Service{cfg: cfg} }
 
 func (c *Client) ResolvePools(ctx context.Context, req ResolvePoolsRequest) (*ResolvePoolsResponse, error) {
+	ctx, recorder := c.startDebug(ctx, "ResolvePools")
+	defer c.finishDebug(recorder)
 	return c.service.ResolvePools(ctx, req)
 }
 
@@ -37,10 +41,12 @@ func (s *Service) ResolvePools(ctx context.Context, req ResolvePoolsRequest) (*R
 		DiscoveryMode:     mode,
 		PoolAddresses:     req.PoolAddresses,
 		DirectSOLOnly:     req.DirectSOLOnly,
+		PreferRaydiumAPI:  s.cfg.PreferRaydiumAPI,
 	})
 	if err != nil {
 		return nil, err
 	}
+	meta = attachRequestDebug(ctx, meta)
 	resp := &ResolvePoolsResponse{Mint: req.Mint.String(), Pools: pools, Metadata: ResolveMetadata{DiscoveryMode: mode, PoolsFound: len(pools), RankedAt: time.Now().UTC(), Debug: meta}}
 	if req.SelectPrimary {
 		resp.PrimaryPool = selectPrimaryFromRankedPools(pools)
@@ -60,6 +66,8 @@ func selectPrimaryFromRankedPools(pools []*Pool) *Pool {
 	return pools[0]
 }
 func (c *Client) GetPool(ctx context.Context, req GetPoolRequest) (*Pool, error) {
+	ctx, recorder := c.startDebug(ctx, "GetPool")
+	defer c.finishDebug(recorder)
 	return c.service.GetPool(ctx, req)
 }
 
@@ -78,16 +86,21 @@ func (s *Service) GetPool(ctx context.Context, req GetPoolRequest) (*Pool, error
 }
 
 func (c *Client) GetTokenMarket(ctx context.Context, req GetTokenMarketRequest) (*GetTokenMarketResponse, error) {
+	ctx, recorder := c.startDebug(ctx, "GetTokenMarket")
+	defer c.finishDebug(recorder)
 	return c.service.GetTokenMarket(ctx, req)
 }
 
 func (s *Service) GetTokenMarket(ctx context.Context, req GetTokenMarketRequest) (*GetTokenMarketResponse, error) {
 	resolved, err := s.ResolvePools(ctx, ResolvePoolsRequest{
-		Mint:          req.Mint,
-		QuoteMint:     req.QuoteMint,
-		Protocols:     req.Protocols,
-		DiscoveryMode: req.DiscoveryMode,
-		SelectPrimary: true,
+		Mint:              req.Mint,
+		QuoteMint:         req.QuoteMint,
+		Protocols:         req.Protocols,
+		DiscoveryMode:     req.DiscoveryMode,
+		IncludeInactive:   req.IncludeInactive,
+		IncludeUnverified: req.IncludeUnverified,
+		DirectSOLOnly:     req.DirectSOLOnly,
+		SelectPrimary:     true,
 	})
 	if err != nil {
 		return nil, err
@@ -113,12 +126,14 @@ func (s *Service) GetTokenMarket(ctx context.Context, req GetTokenMarketRequest)
 		MarketCapInSOL:    primary.MarketCapInSOL,
 		TotalSupply:       total,
 		CirculatingSupply: circ,
-		Metadata:          MarketMetadata{DiscoveryMode: resolved.Metadata.DiscoveryMode, SupplyMethod: method, Debug: resolved.Metadata.Debug},
+		Metadata:          MarketMetadata{DiscoveryMode: resolved.Metadata.DiscoveryMode, SupplyMethod: method, Debug: attachRequestDebug(ctx, resolved.Metadata.Debug)},
 	}, nil
 }
 
 func (c *Client) FindPoolsByMint(ctx context.Context, mint solana.PublicKey) ([]*Pool, error) {
-	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, SelectPrimary: false})
+	ctx, recorder := c.startDebug(ctx, "FindPoolsByMint")
+	defer c.finishDebug(recorder)
+	res, err := c.service.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, IncludeUnverified: true, SelectPrimary: false})
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +141,9 @@ func (c *Client) FindPoolsByMint(ctx context.Context, mint solana.PublicKey) ([]
 }
 
 func (c *Client) FindPoolsByPair(ctx context.Context, baseMint, quoteMint solana.PublicKey) ([]*Pool, error) {
-	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: baseMint, QuoteMint: &quoteMint, SelectPrimary: false})
+	ctx, recorder := c.startDebug(ctx, "FindPoolsByPair")
+	defer c.finishDebug(recorder)
+	res, err := c.service.ResolvePools(ctx, ResolvePoolsRequest{Mint: baseMint, QuoteMint: &quoteMint, IncludeUnverified: true, SelectPrimary: false})
 	if err != nil {
 		return nil, err
 	}
@@ -134,14 +151,18 @@ func (c *Client) FindPoolsByPair(ctx context.Context, baseMint, quoteMint solana
 }
 
 func (c *Client) FindPoolsByProtocol(ctx context.Context, mint solana.PublicKey, protocol Protocol) ([]*Pool, error) {
-	res, err := c.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, Protocols: []Protocol{protocol}, SelectPrimary: false})
+	ctx, recorder := c.startDebug(ctx, "FindPoolsByProtocol")
+	defer c.finishDebug(recorder)
+	res, err := c.service.ResolvePools(ctx, ResolvePoolsRequest{Mint: mint, Protocols: []Protocol{protocol}, IncludeUnverified: true, SelectPrimary: false})
 	if err != nil {
 		return nil, err
 	}
 	return res.Pools, nil
 }
 
-func (c *Client) ComputePoolMetrics(_ context.Context, p *Pool, totalSupply, circulatingSupply decimal.Decimal) (*PoolMetrics, error) {
+func (c *Client) ComputePoolMetrics(ctx context.Context, p *Pool, totalSupply, circulatingSupply decimal.Decimal) (*PoolMetrics, error) {
+	ctx, recorder := c.startDebug(ctx, "ComputePoolMetrics")
+	defer c.finishDebug(recorder)
 	if p == nil {
 		return nil, NewError(ErrCodeInvalidArgument, "pool is required", nil)
 	}
@@ -150,11 +171,25 @@ func (c *Client) ComputePoolMetrics(_ context.Context, p *Pool, totalSupply, cir
 }
 
 func (c *Client) ComputeTokenMetricsFromPool(ctx context.Context, mint solana.PublicKey, p *Pool) (*PoolMetrics, error) {
+	ctx, recorder := c.startDebug(ctx, "ComputeTokenMetricsFromPool")
+	defer c.finishDebug(recorder)
 	total, circ, _, err := c.cfg.SupplyProvider.GetSupply(ctx, mint)
 	if err != nil {
 		return nil, err
 	}
 	return c.ComputePoolMetrics(ctx, p, total, circ)
+}
+
+func attachRequestDebug(ctx context.Context, meta map[string]any) map[string]any {
+	recorder := reqdebug.FromContext(ctx)
+	if recorder == nil {
+		return meta
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["requests"] = recorder.SnapshotMap()
+	return meta
 }
 
 func SelectPrimaryPool(pools []*Pool, targetMint string, quoteMint *string) (*Pool, error) {
@@ -212,7 +247,7 @@ func scoreForPool(p *Pool, maxLiq decimal.Decimal, preferredQuote *string) {
 		freshness = decimal.NewFromFloat(0.25)
 	}
 	quotePref := decimal.NewFromFloat(0.5)
-	if p.QuoteMint == solana.SolMint.String() {
+	if pubkeyx.IsSOLMintString(p.QuoteMint) {
 		quotePref = decimal.NewFromInt(1)
 	}
 	if preferredQuote != nil && p.QuoteMint == *preferredQuote {

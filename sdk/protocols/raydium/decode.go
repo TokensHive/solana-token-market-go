@@ -1,6 +1,7 @@
 package raydium
 
 import (
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/gagliardetto/solana-go"
 	"github.com/shopspring/decimal"
@@ -23,7 +24,7 @@ func DecodeConstantProductPool(address, mint solana.PublicKey, protocol market.P
 		Protocol:          protocol,
 		MarketType:        marketType,
 		BaseMint:          mint.String(),
-		QuoteMint:         solana.SolMint.String(),
+		QuoteMint:         pubkeyx.WrappedSOLMintStr,
 		BaseReserve:       base,
 		QuoteReserve:      quote,
 		PriceOfTokenInSOL: price,

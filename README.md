@@ -35,6 +35,9 @@ Default is `onchain`.
 - `hybrid`
 
 `PreferRaydiumAPI` and `PreferMeteoraAPI` are optional hints only.
+When `PreferRaydiumAPI` is enabled and on-chain discovery is empty (or has no usable SOL price),
+the SDK applies API fallback discovery (Raydium first, then DexScreener enrichment) to recover
+real pool pairs/prices.
 
 ## Public API
 
@@ -60,10 +63,37 @@ Policy:
 
 ## Usage
 
-See examples:
-- `examples/resolve_pools`
-- `examples/get_token_market`
-- `examples/get_pool`
+Run the unified examples CLI:
+
+```bash
+go run ./examples -cmd interactive
+go run ./examples -cmd batch-all -debug
+```
+
+Direct commands:
+
+```bash
+go run ./examples -cmd resolve-pools -mint 3y6kjbdG3ULceQMuJh3RWz68bGoEZ3U1YBeJyXbJpump
+go run ./examples -cmd get-token-market -mint 9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump
+go run ./examples -cmd all-methods -mint Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump
+go run ./examples -cmd batch-all
+```
+
+Legacy entry points are still available:
+- `go run ./examples/resolve_pools`
+- `go run ./examples/get_token_market`
+- `go run ./examples/get_pool`
+
+SDK option for request debug telemetry:
+
+```go
+client, err := market.NewClient(
+    market.WithDebugRequests(true),
+)
+```
+
+When enabled, each public API call records categorized request usage and timing in debug metadata
+(`duration_ms`, `rpc` by operation type with per-call timings, `api` by source + operation type with per-call timings), and the examples CLI prints it.
 
 To enable default parser registrations explicitly (opt-in):
 

@@ -3,9 +3,11 @@ package discovery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
+	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
 	"github.com/TokensHive/solana-token-market-go/sdk/market"
 	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/protocols/meteora"
@@ -52,12 +54,24 @@ func (e *Engine) Discover(ctx context.Context, req market.DiscoveryRequest) ([]*
 	meta := map[string]any{"layers": []string{"deterministic", "parser_evidence", "rpc_fallback", "api_optional"}}
 	adapters := e.registry.List(req.Protocols)
 	all := make([]*market.Pool, 0, 8)
+	adapterErrs := make([]error, 0, len(adapters))
 	for _, a := range adapters {
 		pools, err := a.Discover(ctx, req)
 		if err != nil && !errors.Is(err, parser.ErrNoEvidence) {
+			adapterErrs = append(adapterErrs, err)
 			continue
 		}
 		all = append(all, pools...)
+	}
+	if req.PreferRaydiumAPI && (len(all) == 0 || !hasSOLPairWithPrice(all)) {
+		apiPools, apiMeta, apiErr := discoverAPIFallback(ctx, req)
+		if apiErr != nil {
+			adapterErrs = append(adapterErrs, apiErr)
+		}
+		if len(apiPools) > 0 {
+			all = append(all, apiPools...)
+			meta["api_fallback"] = apiMeta
+		}
 	}
 	all = DeduplicatePools(all)
 	all = ApplyFilters(all, FilterOptions{
@@ -82,17 +96,47 @@ func (e *Engine) Discover(ctx context.Context, req market.DiscoveryRequest) ([]*
 		q = &v
 	}
 	ranked := RankPools(all, req.Mint.String(), q)
+	if len(ranked) == 0 && len(adapterErrs) > 0 {
+		return nil, meta, market.NewError(
+			market.ErrCodeRPC,
+			fmt.Sprintf("no pools found and %d/%d adapters encountered errors", len(adapterErrs), len(adapters)),
+			errors.Join(adapterErrs...),
+		)
+	}
 	return ranked, meta, nil
 }
 
 func (e *Engine) FindByPoolAddress(ctx context.Context, addr solana.PublicKey) ([]*market.Pool, map[string]any, error) {
+	adapterErrs := make([]error, 0, len(e.registry.List(nil)))
 	for _, a := range e.registry.List(nil) {
 		p, err := a.GetByAddress(ctx, addr)
 		if err == nil && p != nil {
 			return []*market.Pool{p}, map[string]any{"source": "adapter"}, nil
 		}
+		if err != nil {
+			adapterErrs = append(adapterErrs, err)
+		}
+	}
+	if len(adapterErrs) > 0 {
+		return nil, map[string]any{}, market.NewError(
+			market.ErrCodeRPC,
+			fmt.Sprintf("pool lookup failed for address %s: %d adapters returned errors", addr.String(), len(adapterErrs)),
+			errors.Join(adapterErrs...),
+		)
 	}
 	return nil, map[string]any{}, nil
+}
+
+func hasSOLPairWithPrice(pools []*market.Pool) bool {
+	for _, p := range pools {
+		if p == nil {
+			continue
+		}
+		if p.PriceOfTokenInSOL.GreaterThan(decimal.Zero) && (pubkeyx.IsSOLMintString(p.BaseMint) || pubkeyx.IsSOLMintString(p.QuoteMint)) {
+			return true
+		}
+	}
+	return false
 }
 
 func DeduplicatePools(pools []*market.Pool) []*market.Pool {
@@ -143,6 +187,7 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 		w6 := decimal.NewFromFloat(0.10)
 		w7 := decimal.NewFromFloat(0.03)
 		w8 := decimal.NewFromFloat(0.02)
+		w9 := decimal.NewFromFloat(0.05)
 		normLiq := decimal.Zero
 		if !maxLiq.IsZero() {
 			normLiq = p.LiquidityInSOL.Div(maxLiq)
@@ -162,7 +207,7 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 		quotePref := decimal.NewFromFloat(0.5)
 		if quoteMint != nil && p.QuoteMint == *quoteMint {
 			quotePref = decimal.NewFromFloat(1)
-		} else if p.QuoteMint == solana.SolMint.String() {
+		} else if pubkeyx.IsSOLMintString(p.QuoteMint) {
 			quotePref = decimal.NewFromFloat(0.95)
 		}
 		verified := decimal.NewFromInt(0)
@@ -177,12 +222,17 @@ func RankPools(pools []*market.Pool, targetMint string, quoteMint *string) []*ma
 		if p.BaseReserve.IsZero() || p.QuoteReserve.IsZero() {
 			zeroPenalty = decimal.NewFromInt(1)
 		}
+		priceSignal := decimal.Zero
+		if p.PriceOfTokenInSOL.GreaterThan(decimal.Zero) {
+			priceSignal = decimal.NewFromInt(1)
+		}
 		s := w1.Mul(normLiq).
 			Add(w2.Mul(normTVL)).
 			Add(w3.Mul(normVol)).
 			Add(w4.Mul(fresh)).
 			Add(w5.Mul(quotePref)).
 			Add(w6.Mul(verified)).
+			Add(w9.Mul(priceSignal)).
 			Sub(w7.Mul(stalePenalty)).
 			Sub(w8.Mul(zeroPenalty))
 		p.SelectionScore = s
