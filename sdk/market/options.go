@@ -1,86 +1,48 @@
 package market
 
 import (
-	"time"
+	"fmt"
 
-	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
-	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/quote"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
 	"github.com/TokensHive/solana-token-market-go/sdk/supply"
-	"github.com/gagliardetto/solana-go"
 )
 
-type Cache interface {
-	Get(key string, dst any) (bool, error)
-	Set(key string, value any, ttl time.Duration) error
-	Delete(key string) error
-}
-
 type Config struct {
-	RPCClient         rpc.Client
-	Parser            parser.Adapter
-	DiscoveryEngine   DiscoveryEngine
-	QuoteBridge       quote.Bridge
-	SupplyProvider    supply.Provider
-	Cache             Cache
-	DebugRequests     bool
-	PreferRaydiumAPI  bool
-	PreferMeteoraAPI  bool
-	DefaultMode       DiscoveryMode
-	RequestTimeout    time.Duration
-	RetryCount        int
-	StableQuoteMints  []solana.PublicKey
-	DefaultQuoteMints []solana.PublicKey
+	RPCClient               rpc.Client
+	QuoteBridge             quote.Bridge
+	SupplyProvider          supply.Provider
+	DebugRequests           bool
+	MaxTxSignatures         int
+	PoolCalculatorFactories map[PoolRoute]PoolCalculatorFactory
 }
 
 type Option func(*Config) error
 
 func defaultConfig() Config {
 	return Config{
-		DefaultMode:    DiscoveryModeOnChain,
-		RequestTimeout: 8 * time.Second,
-		RetryCount:     2,
-		StableQuoteMints: []solana.PublicKey{
-			solana.MustPublicKeyFromBase58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), // USDC
-			solana.MustPublicKeyFromBase58("Es9vMFrzaCERmJfrF4H2ZQ8QYfV7kRXKuX3sX5Yucs5b"), // USDT
-		},
-		DefaultQuoteMints: []solana.PublicKey{pubkeyx.WrappedSOLMint, solana.SolMint},
+		MaxTxSignatures:         120,
+		PoolCalculatorFactories: map[PoolRoute]PoolCalculatorFactory{},
 	}
 }
 
 func WithRPCClient(c rpc.Client) Option {
-	return func(cfg *Config) error { cfg.RPCClient = c; return nil }
-}
-
-func WithParserAdapter(p parser.Adapter) Option {
-	return func(cfg *Config) error { cfg.Parser = p; return nil }
-}
-
-func WithDiscoveryEngine(e DiscoveryEngine) Option {
-	return func(cfg *Config) error { cfg.DiscoveryEngine = e; return nil }
+	return func(cfg *Config) error {
+		cfg.RPCClient = c
+		return nil
+	}
 }
 
 func WithQuoteBridge(b quote.Bridge) Option {
-	return func(cfg *Config) error { cfg.QuoteBridge = b; return nil }
+	return func(cfg *Config) error {
+		cfg.QuoteBridge = b
+		return nil
+	}
 }
 
 func WithSupplyProvider(p supply.Provider) Option {
-	return func(cfg *Config) error { cfg.SupplyProvider = p; return nil }
-}
-
-func WithCache(cache Cache) Option {
-	return func(cfg *Config) error { cfg.Cache = cache; return nil }
-}
-
-func WithDiscoveryMode(mode DiscoveryMode) Option {
-	return func(cfg *Config) error { cfg.DefaultMode = mode; return nil }
-}
-
-func WithAPIHints(preferRaydiumAPI, preferMeteoraAPI bool) Option {
 	return func(cfg *Config) error {
-		cfg.PreferRaydiumAPI = preferRaydiumAPI
-		cfg.PreferMeteoraAPI = preferMeteoraAPI
+		cfg.SupplyProvider = p
 		return nil
 	}
 }
@@ -88,6 +50,31 @@ func WithAPIHints(preferRaydiumAPI, preferMeteoraAPI bool) Option {
 func WithDebugRequests(enabled bool) Option {
 	return func(cfg *Config) error {
 		cfg.DebugRequests = enabled
+		return nil
+	}
+}
+
+func WithMaxTxSignatures(limit int) Option {
+	return func(cfg *Config) error {
+		if limit > 0 {
+			cfg.MaxTxSignatures = limit
+		}
+		return nil
+	}
+}
+
+func WithPoolCalculatorFactory(route PoolRoute, factory PoolCalculatorFactory) Option {
+	return func(cfg *Config) error {
+		if route.Dex == "" || route.PoolVersion == "" {
+			return fmt.Errorf("pool route dex and pool version are required")
+		}
+		if factory == nil {
+			return fmt.Errorf("pool calculator factory is required")
+		}
+		if cfg.PoolCalculatorFactories == nil {
+			cfg.PoolCalculatorFactories = map[PoolRoute]PoolCalculatorFactory{}
+		}
+		cfg.PoolCalculatorFactories[route] = factory
 		return nil
 	}
 }

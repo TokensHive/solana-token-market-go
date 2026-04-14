@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
-	"github.com/TokensHive/solana-token-market-go/sdk/parser"
 	"github.com/TokensHive/solana-token-market-go/sdk/quote"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
 	"github.com/TokensHive/solana-token-market-go/sdk/supply"
@@ -28,17 +27,11 @@ func NewClient(opts ...Option) (*Client, error) {
 	if cfg.RPCClient == nil {
 		cfg.RPCClient = rpc.NewNoopClient()
 	}
-	if cfg.Parser == nil {
-		cfg.Parser = parser.NewNoopAdapter()
-	}
 	if cfg.QuoteBridge == nil {
 		cfg.QuoteBridge = quote.NewNoopBridge()
 	}
 	if cfg.SupplyProvider == nil {
 		cfg.SupplyProvider = supply.NewDefaultProvider(cfg.RPCClient)
-	}
-	if cfg.DiscoveryEngine == nil {
-		cfg.DiscoveryEngine = newNoopDiscoveryEngine()
 	}
 	c := &Client{cfg: cfg}
 	c.service = NewService(cfg)
