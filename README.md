@@ -1,116 +1,152 @@
-# solana-token-market-go
+# Solana Token Market Go SDK
 
-On-chain-first Go SDK for Solana token market discovery and pricing.
+Metrics-only Solana SDK focused on deterministic market metrics for explicit pool identifiers.
 
-## Architecture
+## Install
 
-- `sdk/market`: public client API, normalized models, typed requests/responses
-- `sdk/discovery`: layered discovery (deterministic PDA -> parser evidence -> rpc fallback -> optional api)
-- `sdk/protocols`: protocol adapters for Pumpfun, PumpSwap, Raydium, Orca, Meteora
-- `sdk/rpc`: bounded RPC abstraction and account/supply helpers
-- `sdk/parser`: adapter hooks for `github.com/DefaultPerson/solana-dex-parser-go`
-- `sdk/supply`: total/circulating supply providers
-- `sdk/quote`: SOL/stable quote bridging abstraction
+```bash
+go get github.com/TokensHive/solana-token-market-go
+```
 
-## Supported Protocols
+## Supported in Phase 2
 
-- Pumpfun bonding curve
-- PumpSwap
-- Raydium V4
-- Raydium CPMM
-- Raydium CLMM
-- Raydium LaunchLab
-- Orca Whirlpool
-- Meteora DLMM
-- Meteora DAMM
-- Meteora DBC
-
-## On-chain vs API-first
-
-Default is `onchain`.
-
-`DiscoveryMode` values:
-- `onchain` (default)
-- `api-first` (optional, must still verify on-chain)
-- `hybrid`
-
-`PreferRaydiumAPI` and `PreferMeteoraAPI` are optional hints only.
-When `PreferRaydiumAPI` is enabled and on-chain discovery is empty (or has no usable SOL price),
-the SDK applies API fallback discovery (Raydium first, then DexScreener enrichment) to recover
-real pool pairs/prices.
+- `dex`: `pumpfun`
+- `poolVersion`:
+  - `bonding_curve`
+  - `pumpswap_amm`
 
 ## Public API
 
-- `NewClient(opts ...Option)`
-- `ResolvePools(ctx, req)`
-- `GetPool(ctx, req)`
-- `GetTokenMarket(ctx, req)`
-- `FindPoolsByMint`, `FindPoolsByPair`, `FindPoolsByProtocol`
-- `ComputePoolMetrics`, `ComputeTokenMetricsFromPool`, `SelectPrimaryPool`
+The active public SDK surface is:
 
-## Ranking
+- `market.NewClient(...)`
+- `client.GetMetricsByPool(ctx, request)`
+- `client.LastRequestDebug()`
+- `market.WithPoolCalculatorFactory(route, factory)` (for adding new market routes)
 
-Deterministic ranking is centralized and stores:
-- `SelectionScore`
-- `SelectionReason`
+## Metrics Output
 
-Policy:
-- prefer SOL quote pools
-- prefer verified pools
-- prefer higher liquidity/fresher pools
-- penalize stale/empty pools
-- for completed Pumpfun curves, migrated funded AMMs are preferred as primary
+`GetMetricsByPool` returns normalized values for:
 
-## Usage
+- `PriceOfAInB`
+- `PriceOfAInSOL`
+- `LiquidityInB`
+- `LiquidityInSOL`
+- `TotalSupply`
+- `CirculatingSupply`
+- `MarketCapInSOL`
+- `SupplyMethod`
 
-Run the unified examples CLI:
+## Quick Example
 
-```bash
-go run ./examples -cmd interactive
-go run ./examples -cmd batch-all -debug
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/TokensHive/solana-token-market-go/sdk/market"
+	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
+	"github.com/gagliardetto/solana-go"
+)
+
+func main() {
+	client, err := market.NewClient(
+		market.WithRPCClient(rpc.NewSolanaRPCClient("https://api.mainnet-beta.solana.com")),
+		market.WithDebugRequests(true),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	mintA := solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")
+	mintB := solana.SolMint
+
+	resp, err := client.GetMetricsByPool(ctx, market.GetMetricsByPoolRequest{
+		Pool: market.PoolIdentifier{
+			Dex:         market.DexPumpfun,
+			PoolVersion: market.PoolVersionPumpfunBondingCurve,
+			MintA:       mintA,
+			MintB:       mintB,
+			PoolAddress: solana.MustPublicKeyFromBase58("2ebnjcJ5f8V6NhvWQfagfo6f6Mpn8jL42x8UxKM4Gz8H"),
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("price_a_in_sol:", resp.PriceOfAInSOL)
+	fmt.Println("liquidity_in_sol:", resp.LiquidityInSOL)
+	fmt.Println("market_cap_in_sol:", resp.MarketCapInSOL)
+}
 ```
 
-Direct commands:
+## Example Runner
+
+The `examples` folder is intentionally minimal and now contains a single interactive CLI:
 
 ```bash
-go run ./examples -cmd resolve-pools -mint 3y6kjbdG3ULceQMuJh3RWz68bGoEZ3U1YBeJyXbJpump
-go run ./examples -cmd get-token-market -mint 9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump
-go run ./examples -cmd all-methods -mint Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump
-go run ./examples -cmd batch-all
+go run ./examples
 ```
 
-Legacy entry points are still available:
-- `go run ./examples/resolve_pools`
-- `go run ./examples/get_token_market`
-- `go run ./examples/get_pool`
+### Interactive mode (default)
 
-SDK option for request debug telemetry:
+`go run ./examples` opens a menu to test all public methods in this SDK surface:
+
+- `market.NewClient(...)`
+- `client.GetMetricsByPool(...)`
+- `client.LastRequestDebug()`
+
+You can:
+
+- run default Pumpfun bonding-curve metrics request
+- run default PumpSwap AMM metrics request
+- run both defaults
+
+### Non-interactive mode (automation/CI)
+
+```bash
+go run ./examples -interactive=false
+```
+
+Optional flags:
+
+- `-rpc` custom RPC endpoint
+- `-timeout` per-request timeout (example: `60s`)
+- `-debug` print or hide `LastRequestDebug()` output
+
+## Extending With New Markets
+
+The SDK now routes metrics calculators through a `Dex + PoolVersion` registry.
+
+- built-in routes are registered by default in `market.NewService(...)`
+- you can register/override routes with `market.WithPoolCalculatorFactory(...)`
+
+High-level pattern:
 
 ```go
 client, err := market.NewClient(
-    market.WithDebugRequests(true),
+	market.WithRPCClient(rpc.NewSolanaRPCClient("https://api.mainnet-beta.solana.com")),
+	market.WithPoolCalculatorFactory(
+		market.PoolRoute{Dex: "my_dex", PoolVersion: "my_pool_v1"},
+		func(cfg market.Config) market.PoolCalculator {
+			return myCalculator{cfg: cfg}
+		},
+	),
 )
+
+type myCalculator struct {
+	cfg market.Config
+}
+
+func (m myCalculator) Compute(ctx context.Context, pool market.PoolIdentifier) (*market.GetMetricsByPoolResponse, error) {
+	// call your on-chain calculator and return normalized response
+	return &market.GetMetricsByPoolResponse{Pool: pool}, nil
+}
 ```
-
-When enabled, each public API call records categorized request usage and timing in debug metadata
-(`duration_ms`, `rpc` by operation type with per-call timings, `api` by source + operation type with per-call timings), and the examples CLI prints it.
-
-To enable default parser registrations explicitly (opt-in):
-
-```go
-import _ "github.com/TokensHive/solana-token-market-go/sdk/parser/all"
-```
-
-## Protocol limitations / approximations
-
-- CLMM/Whirlpool/DLMM liquidity is currently best-effort and marked via metadata.
-- Full tick/bin depth traversal is not yet implemented.
-- Parser adapter defaults to noop unless parser-backed evidence source is injected.
-
-## TODO (clear gaps)
-
-- Implement parser-backed production adapter using transaction/yellowstone ingestion.
-- Implement full on-chain decoders for each protocol state layout.
-- Implement stable->SOL bridge source for non-SOL quote pools.
-- Add optional API bootstrap integrations with strict on-chain verification.
-- Expand golden fixtures with real mainnet snapshots.

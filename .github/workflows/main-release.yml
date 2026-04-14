@@ -4,22 +4,21 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   validate:
-    name: Validate tests and mint checks
+    name: Validate tests and examples
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      MINT_TEST_TIMEOUT: 180s
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -27,135 +26,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run all Go tests
-        run: go test ./...
-
-      - name: Run mint checks and generate benchmark report
+      - name: Run all Go tests with 100% coverage gate
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .artifacts
-          report=".artifacts/BENCHMARK.md"
-          {
-            echo "# BENCHMARK"
-            echo
-            echo "Generated on: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-            echo
-            echo "## Summary"
-            echo
-            echo "| Mint | Status | Duration | RPC Calls | API Calls | SDK ms |"
-            echo "|---|---|---|---|---|---|"
-          } > "${report}"
-
-          mapfile -t MINTS < <(awk 'NF {gsub(/[[:space:]]+/, "", $0); print $0}' .github/mint-tests.txt)
-          if [[ "${#MINTS[@]}" -eq 0 ]]; then
-            echo "No mint test identifiers configured in .github/mint-tests.txt"
-            exit 1
-          fi
-          failures=0
-          total=0
-
-          # Collect per-call detail sections to append after the summary table.
-          detail_file=".artifacts/benchmark-details.tmp"
-          > "${detail_file}"
-
-          for mint in "${MINTS[@]}"; do
-            total=$((total + 1))
-            start="$(date +%s)"
-            log_file=".artifacts/mint-${mint}.log"
-            if go run ./examples -cmd all-methods -mint "${mint}" -debug -timeout "${MINT_TEST_TIMEOUT}" > "${log_file}" 2>&1; then
-              status="PASS"
-            else
-              status="FAIL"
-              failures=$((failures + 1))
-            fi
-            duration="$(( $(date +%s) - start ))s"
-
-            # Parse TELEMETRY block written by the runner.
-            rpc_total="-"
-            api_total="-"
-            sdk_ms="-"
-            if grep -q "^TELEMETRY_BEGIN" "${log_file}" 2>/dev/null; then
-              total_line="$(sed -n '/^TELEMETRY_BEGIN/,/^TELEMETRY_END/p' "${log_file}" | grep "^TELEMETRY_TOTAL" || true)"
-              if [[ -n "${total_line}" ]]; then
-                read -r sdk_ms rpc_total api_total < <(echo "${total_line}" | awk '{
-                  for (i=1;i<=NF;i++) { split($i,a,"=");
-                    if (a[1]=="duration_ms") ms=a[2];
-                    else if (a[1]=="rpc") rpc=a[2];
-                    else if (a[1]=="api") api=a[2]; }
-                  print ms, rpc, api }')
-              fi
-            fi
-
-            echo "| \`${mint}\` | ${status} | ${duration} | ${rpc_total} | ${api_total} | ${sdk_ms} |" >> "${report}"
-
-            # Build per-call detail table for this mint.
-            {
-              echo
-              echo "### \`${mint}\` — ${status}"
-              echo
-              echo "| Call | Status | Duration (ms) | RPC Calls | API Calls |"
-              echo "| --- | --- | --- | --- | --- |"
-              if grep -q "^TELEMETRY_BEGIN" "${log_file}" 2>/dev/null; then
-                while IFS= read -r line; do
-                  case "${line}" in
-                    op=*)
-                      read -r op st ms rpc api < <(echo "${line}" | awk '{
-                        for (i=1;i<=NF;i++) { split($i,a,"=");
-                          if (a[1]=="op") op=a[2];
-                          else if (a[1]=="status") st=a[2];
-                          else if (a[1]=="duration_ms") ms=a[2];
-                          else if (a[1]=="rpc") rpc=a[2];
-                          else if (a[1]=="api") api=a[2]; }
-                        print op, st, ms, rpc, api }')
-                      echo "| ${op} | ${st} | ${ms} | ${rpc} | ${api} |"
-                      ;;
-                    TELEMETRY_TOTAL*)
-                      read -r ms rpc api < <(echo "${line}" | awk '{
-                        for (i=1;i<=NF;i++) { split($i,a,"=");
-                          if (a[1]=="duration_ms") ms=a[2];
-                          else if (a[1]=="rpc") rpc=a[2];
-                          else if (a[1]=="api") api=a[2]; }
-                        print ms, rpc, api }')
-                      echo "| **Total** | — | **${ms}** | **${rpc}** | **${api}** |"
-                      ;;
-                  esac
-                done < <(sed -n '/^TELEMETRY_BEGIN/,/^TELEMETRY_END/p' "${log_file}")
-              else
-                echo "| _(telemetry unavailable)_ | — | — | — | — |"
-              fi
-            } >> "${detail_file}"
-          done
-
-          {
-            echo
-            echo "Mint checks failed: ${failures}/${total}"
-            echo
-            echo "## Per-Call Telemetry"
-            cat "${detail_file}"
-          } >> "${report}"
-
-          cp "${report}" BENCHMARK.md
-
-          if [[ "${failures}" -gt 0 ]]; then
-            echo "One or more mint checks failed."
+          go test ./... -coverprofile=coverage.out
+          go tool cover -func=coverage.out
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')"
+          if [[ "${total}" != "100.0" ]]; then
+            echo "Coverage gate failed: expected 100.0, got ${total}"
             exit 1
           fi
 
-      - name: Upload benchmark report
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-report
-          path: BENCHMARK.md
-
-      - name: Upload mint logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: mint-check-logs
-          path: .artifacts/mint-*.log
+      - name: Build examples CLI
+        run: go build -o /tmp/metrics-cli ./examples
 
   release:
     name: Tag and release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: validate
     timeout-minutes: 15
@@ -176,12 +64,6 @@ jobs:
           bump_each_commit: false
           version_format: "${major}.${minor}.${patch}"
 
-      - name: Download benchmark report
-        uses: actions/download-artifact@v4
-        with:
-          name: benchmark-report
-          path: .artifacts
-
       - name: Build release description
         shell: bash
         run: |
@@ -190,8 +72,9 @@ jobs:
           {
             echo "Automated release for ${version}."
             echo
-            echo "## Mint benchmark results"
-            cat .artifacts/BENCHMARK.md
+            echo "Validated by CI:"
+            echo "- go test ./... -coverprofile=coverage.out (100% required)"
+            echo "- go build -o /tmp/metrics-cli ./examples"
           } > RELEASE_NOTES.md
 
       - name: Create GitHub release and tag
@@ -201,6 +84,5 @@ jobs:
           name: v${{ steps.version.outputs.version }}
           body_path: RELEASE_NOTES.md
           generate_release_notes: false
-          files: .artifacts/BENCHMARK.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
