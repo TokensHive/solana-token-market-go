@@ -12,6 +12,20 @@
 On-chain-first Go SDK for deterministic Solana token market metrics.  
 This SDK focuses on a single responsibility: compute price, liquidity, supply, market cap, and FDV for an explicit `(DEX, pool version, mintA, mintB, pool address)` route.
 
+## Demo Video
+
+<div align="center">
+  <video
+    src="docs/media/examples-cli.mp4"
+    controls
+    preload="metadata"
+    width="960"
+    poster="docs/media/solana-token-market-go.png">
+    Your browser does not support the video tag.
+  </video>
+  <p><em>Interactive CLI walkthrough across supported DEX pool versions.</em></p>
+</div>
+
 ## Why This SDK
 
 - No opaque discovery dependency for core metrics paths
@@ -142,6 +156,122 @@ Useful flags:
 - `-rpc`: custom RPC endpoint
 - `-timeout`: request timeout (for example `60s`)
 - `-debug`: include/exclude `LastRequestDebug()` output
+
+## Milestone: Resilience, Performance, and Integrations
+
+### Performance KPI
+
+- Target: reduce average `GetMetricsByPool` latency by **20-30%** on common pools.
+
+### RPC Resilience Matrix
+
+| Call Type | Timeout Target | Retry Strategy | Fallback Pattern | Notes |
+| --- | --- | --- | --- | --- |
+| `GetAccount` | 700ms to 1200ms | 2 retries, exponential backoff with jitter (`100ms`, `250ms`) | switch RPC endpoint on timeout/5xx | used for primary pool account reads |
+| `GetMultipleAccounts` | 900ms to 1500ms | 2 retries, chunk-aware retries | fallback endpoint + reduce chunk size | highest impact on latency; optimize batching |
+| `GetTokenSupply` | 600ms to 1000ms | 1 retry | fallback endpoint | usually lightweight but required for supply pipeline |
+| `GetSignaturesForAddress` | 1200ms to 2500ms | 1 retry | fallback endpoint | mostly for optional workflows, not core metrics path |
+| `GetTransaction` / `GetTransactionRaw` | 1500ms to 3000ms | 1 retry | fallback endpoint + lower concurrency | heavy payload path; keep isolated from metrics fast path |
+
+Recommended defaults:
+
+- keep short request deadlines (`context.WithTimeout`)
+- run independent RPC calls concurrently
+- limit in-flight RPC fanout per request
+- use failover RPC client for endpoint fallback
+- emit request telemetry and monitor P50/P95/P99 latencies
+
+### Integration Examples
+
+#### 1) Backend API server
+
+```go
+type Server struct {
+    client *market.Client
+}
+
+func (s *Server) HandleMetrics(w http.ResponseWriter, r *http.Request) {
+    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+    defer cancel()
+
+    req := decodeRequest(r) // parse dex/poolVersion/mints/poolAddress
+    resp, err := s.client.GetMetricsByPool(ctx, req)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    json.NewEncoder(w).Encode(resp)
+}
+```
+
+#### 2) Cron / indexer
+
+```go
+func runIndexer(ctx context.Context, client *market.Client, pools []market.PoolIdentifier) error {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    for {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        case <-ticker.C:
+            for _, pool := range pools {
+                req := market.GetMetricsByPoolRequest{Pool: pool}
+                resp, err := client.GetMetricsByPool(ctx, req)
+                if err == nil {
+                    persistSnapshot(pool, resp) // write DB/time-series
+                }
+            }
+        }
+    }
+}
+```
+
+#### 3) Trading bot pre-trade checks
+
+```go
+func preTradeCheck(ctx context.Context, client *market.Client, req market.GetMetricsByPoolRequest) error {
+    resp, err := client.GetMetricsByPool(ctx, req)
+    if err != nil {
+        return err
+    }
+    if resp.LiquidityInSOL.LessThan(decimal.RequireFromString("50")) {
+        return fmt.Errorf("insufficient liquidity")
+    }
+    if resp.PriceOfAInSOL.IsZero() {
+        return fmt.Errorf("invalid price")
+    }
+    return nil
+}
+```
+
+#### 4) Realtime pipeline with Geyser gRPC
+
+Use Geyser gRPC for account-change streaming, then recompute metrics only for affected pools:
+
+```go
+func onAccountUpdate(update *geyserpb.AccountUpdate) {
+    // 1) map changed account -> impacted pools
+    // 2) enqueue recompute jobs
+}
+
+func worker(ctx context.Context, client *market.Client, jobs <-chan market.PoolIdentifier) {
+    for pool := range jobs {
+        req := market.GetMetricsByPoolRequest{Pool: pool}
+        resp, err := client.GetMetricsByPool(ctx, req)
+        if err == nil {
+            publishRealtimeStats(pool, resp) // websocket/kafka/redis stream
+        }
+    }
+}
+```
+
+Suggested realtime architecture:
+
+- ingest: Geyser gRPC account stream
+- routing: account-to-pool impact map
+- compute: bounded worker pool calling `GetMetricsByPool`
+- output: websocket broadcast + durable store for charts/stats
 
 ## Extending With New Markets
 
