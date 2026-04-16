@@ -14,17 +14,12 @@ This SDK focuses on a single responsibility: compute price, liquidity, supply, m
 
 ## Demo Video
 
-<div align="center">
-  <video
-    src="docs/media/examples-cli.mp4"
-    controls
-    preload="metadata"
-    width="960"
-    poster="docs/media/solana-token-market-go.png">
-    Your browser does not support the video tag.
-  </video>
-  <p><em>Interactive CLI walkthrough across supported DEX pool versions.</em></p>
-</div>
+<details>
+  <summary><strong>Watch Demo Video</strong></summary>
+
+  [Open video](https://github.com/TokensHive/solana-token-market-go/blob/main/docs/media/examples-cli.mp4?raw=1)
+
+</details>
 
 ## Why This SDK
 
