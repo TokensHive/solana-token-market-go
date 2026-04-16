@@ -7,6 +7,8 @@
 [![License](https://img.shields.io/github/license/TokensHive/solana-token-market-go)](https://github.com/TokensHive/solana-token-market-go/blob/main/LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/TokensHive/solana-token-market-go?style=social)](https://github.com/TokensHive/solana-token-market-go/stargazers)
 
+![Solana Token Market Go SDK Banner](docs/media/solana-token-market-go.png)
+
 On-chain-first Go SDK for deterministic Solana token market metrics.  
 This SDK focuses on a single responsibility: compute price, liquidity, supply, market cap, and FDV for an explicit `(DEX, pool version, mintA, mintB, pool address)` route.
 
