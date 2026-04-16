@@ -455,9 +455,6 @@ func lockedProfit(currentUnix int64, lastLockedProfit uint64, lastReport uint64,
 	remaining := new(big.Int).Sub(denominator, ratio)
 	locked := new(big.Int).Mul(new(big.Int).SetUint64(lastLockedProfit), remaining)
 	locked.Div(locked, denominator)
-	if !locked.IsUint64() {
-		return 0
-	}
 	return locked.Uint64()
 }
 

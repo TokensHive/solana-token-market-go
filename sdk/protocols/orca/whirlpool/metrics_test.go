@@ -449,6 +449,37 @@ func TestCompute_BatchDecodeAndDownstreamErrors(t *testing.T) {
 	}
 }
 
+func TestCompute_QuoteConversionError(t *testing.T) {
+	pool := testPubkey(141)
+	mintA := solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")
+	mintB := solana.MustPublicKeyFromBase58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+	vaultA := testPubkey(142)
+	vaultB := testPubkey(143)
+
+	mockRPCClient := &mockRPC{
+		accounts: map[string]*rpc.AccountInfo{
+			pool.String():   {Address: pool, Owner: whirlpoolProgramID, Exists: true, Data: makePoolData(mintA, mintB, vaultA, vaultB)},
+			vaultA.String(): {Address: vaultA, Exists: true, Data: makeTokenAccountData(2_000_000)},
+			vaultB.String(): {Address: vaultB, Exists: true, Data: makeTokenAccountData(5_000_000_000)},
+			mintA.String():  {Address: mintA, Exists: true, Data: makeMintData(6)},
+			mintB.String():  {Address: mintB, Exists: true, Data: makeMintData(6)},
+		},
+	}
+
+	calc := NewCalculator(mockRPCClient, &mockQuote{err: errors.New("quote error")}, &mockSupply{
+		total:  decimal.NewFromInt(1_000_000),
+		circ:   decimal.NewFromInt(900_000),
+		method: "mock_supply",
+	})
+	if _, err := calc.Compute(context.Background(), Request{
+		PoolAddress: pool,
+		MintA:       mintA,
+		MintB:       mintB,
+	}); err == nil {
+		t.Fatal("expected quote conversion error")
+	}
+}
+
 func TestHelpers(t *testing.T) {
 	if _, err := decodePoolState([]byte{1}); err == nil {
 		t.Fatal("expected decode pool short data error")
@@ -504,6 +535,9 @@ func TestHelpers(t *testing.T) {
 	}
 	if got := priceOfMintAInMintB(req, state, decimal.Zero); !got.IsZero() {
 		t.Fatalf("expected zero price branch, got %s", got)
+	}
+	if got := priceOfMintAInMintB(Request{MintA: testPubkey(101), MintB: testPubkey(102)}, state, decimal.NewFromInt(2)); !got.IsZero() {
+		t.Fatalf("expected zero price for unmatched pair, got %s", got)
 	}
 
 	snapshot := &reserveSnapshot{

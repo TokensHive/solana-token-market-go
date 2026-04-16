@@ -344,6 +344,15 @@ func TestInteractiveShowsPresetErrors(t *testing.T) {
 	}
 }
 
+func TestInteractiveInvalidNumericOption(t *testing.T) {
+	out := bytes.NewBuffer(nil)
+	client := &fakeClient{resp: &market.GetMetricsByPoolResponse{}}
+	runInteractive(strings.NewReader("999\n13\n"), out, client, time.Second, false)
+	if !strings.Contains(out.String(), "Unknown option.") {
+		t.Fatalf("expected unknown numeric option message, got: %s", out.String())
+	}
+}
+
 func TestRunWithPresetAndBuildRequest(t *testing.T) {
 	client := &fakeClient{
 		resp: &market.GetMetricsByPoolResponse{
@@ -483,6 +492,53 @@ func TestWithCRLF(t *testing.T) {
 	}
 	if got := out.String(); got != "a\r\nb\r\nc" {
 		t.Fatalf("unexpected normalized output: %q", got)
+	}
+}
+
+func TestReadPromptLineEscapeBranches(t *testing.T) {
+	line, err := readPromptLine(bufio.NewReader(strings.NewReader("abc\x1bXYtail\n")))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if line != "abc" {
+		t.Fatalf("expected ESC to terminate buffered text, got %q", line)
+	}
+
+	line, err = readPromptLine(bufio.NewReader(strings.NewReader("\x1bXYtail\n")))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if line != "XYtail" {
+		t.Fatalf("expected leading ESC to be ignored, got %q", line)
+	}
+}
+
+func TestConsumeEscapeAsEnterBranches(t *testing.T) {
+	if consumeEscapeAsEnter(bufio.NewReader(strings.NewReader("A"))) {
+		t.Fatal("expected false when escape sequence is too short")
+	}
+	if consumeEscapeAsEnter(bufio.NewReader(strings.NewReader("AB"))) {
+		t.Fatal("expected false for non-enter escape sequence")
+	}
+}
+
+func TestCRLFWriterEdgeCases(t *testing.T) {
+	writer := &crlfWriter{w: bytes.NewBuffer(nil)}
+	n, err := writer.Write(nil)
+	if err != nil {
+		t.Fatalf("unexpected error for empty write: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected zero bytes written for empty input, got %d", n)
+	}
+
+	writer = &crlfWriter{w: errWriter{}}
+	n, err = writer.Write([]byte("x"))
+	if err == nil {
+		t.Fatal("expected downstream writer error")
+	}
+	if n != 0 {
+		t.Fatalf("expected zero bytes written on downstream error, got %d", n)
 	}
 }
 
@@ -818,4 +874,10 @@ type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) {
 	return 0, errors.New("read error")
+}
+
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write error")
 }

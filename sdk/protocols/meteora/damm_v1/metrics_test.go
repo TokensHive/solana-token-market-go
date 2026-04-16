@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -481,6 +482,27 @@ func TestCompute_BatchDecodeAndDownstreamErrors(t *testing.T) {
 
 	calc = NewCalculator(&mockRPC{
 		accounts: baseAccounts,
+		getMultipleFn: func(addresses []solana.PublicKey) ([]*rpc.AccountInfo, error) {
+			if len(addresses) == 7 {
+				out := make([]*rpc.AccountInfo, 0, len(addresses))
+				for _, address := range addresses {
+					out = append(out, baseAccounts[address.String()])
+				}
+				return out, nil
+			}
+			return nil, errors.New("lp mint batch failed")
+		},
+	}, nil, &mockSupply{})
+	if _, err := calc.Compute(context.Background(), Request{
+		PoolAddress: pool,
+		MintA:       mintA,
+		MintB:       mintB,
+	}); err == nil {
+		t.Fatal("expected lp mint batch rpc error")
+	}
+
+	calc = NewCalculator(&mockRPC{
+		accounts: baseAccounts,
 		getMultipleFn: func([]solana.PublicKey) ([]*rpc.AccountInfo, error) {
 			return []*rpc.AccountInfo{}, nil
 		},
@@ -698,6 +720,48 @@ func TestCompute_BatchDecodeAndDownstreamErrors(t *testing.T) {
 	}
 }
 
+func TestCompute_QuoteConversionError(t *testing.T) {
+	pool := testPubkey(141)
+	lpMint := testPubkey(142)
+	mintA := solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")
+	mintB := solana.MustPublicKeyFromBase58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+	aVault := testPubkey(143)
+	bVault := testPubkey(144)
+	aVaultLPToken := testPubkey(145)
+	bVaultLPToken := testPubkey(146)
+	aVaultLPMint := testPubkey(147)
+	bVaultLPMint := testPubkey(148)
+	clockTimestamp := time.Now().Unix()
+
+	mockRPCClient := &mockRPC{
+		accounts: map[string]*rpc.AccountInfo{
+			pool.String():          {Address: pool, Owner: dammV1ProgramID, Exists: true, Data: makePoolData(lpMint, mintA, mintB, aVault, bVault, aVaultLPToken, bVaultLPToken)},
+			aVaultLPToken.String(): {Address: aVaultLPToken, Exists: true, Data: makeTokenAccountData(aVaultLPMint, 20_000)},
+			bVaultLPToken.String(): {Address: bVaultLPToken, Exists: true, Data: makeTokenAccountData(bVaultLPMint, 50_000)},
+			aVault.String():        {Address: aVault, Owner: vaultProgramID, Exists: true, Data: makeVaultData(testPubkey(149), aVaultLPMint, 10_000_000, 0, uint64(clockTimestamp), 0)},
+			bVault.String():        {Address: bVault, Owner: vaultProgramID, Exists: true, Data: makeVaultData(testPubkey(150), bVaultLPMint, 10_000_000_000, 0, uint64(clockTimestamp), 0)},
+			mintA.String():         {Address: mintA, Exists: true, Data: makeMintData(6, 0)},
+			mintB.String():         {Address: mintB, Exists: true, Data: makeMintData(6, 0)},
+			clockSysvarID.String(): {Address: clockSysvarID, Exists: true, Data: makeClockData(clockTimestamp)},
+			aVaultLPMint.String():  {Address: aVaultLPMint, Exists: true, Data: makeMintData(6, 100_000)},
+			bVaultLPMint.String():  {Address: bVaultLPMint, Exists: true, Data: makeMintData(6, 100_000)},
+		},
+	}
+
+	calc := NewCalculator(mockRPCClient, &mockQuote{err: errors.New("quote error")}, &mockSupply{
+		total:  decimal.NewFromInt(1_000_000),
+		circ:   decimal.NewFromInt(800_000),
+		method: "mock_supply",
+	})
+	if _, err := calc.Compute(context.Background(), Request{
+		PoolAddress: pool,
+		MintA:       mintA,
+		MintB:       mintB,
+	}); err == nil {
+		t.Fatal("expected quote conversion error")
+	}
+}
+
 func TestHelpers(t *testing.T) {
 	if _, err := decodePoolState([]byte{1}); err == nil {
 		t.Fatal("expected decode pool short data error")
@@ -759,6 +823,9 @@ func TestHelpers(t *testing.T) {
 	}
 	if got := amountByShare(10, 1000, 100); got != 100 {
 		t.Fatalf("unexpected amount by share: %d", got)
+	}
+	if got := amountByShare(math.MaxUint64, math.MaxUint64, 1); got != 0 {
+		t.Fatalf("expected overflow guard branch to return zero, got %d", got)
 	}
 
 	if got := curveTypeString(0); got != "constant_product" {
