@@ -82,6 +82,9 @@ func TestComputeBondingCurveMetrics(t *testing.T) {
 	if got := resp.CirculatingSupply.String(); got != "216129426.931605" {
 		t.Fatalf("unexpected circulating supply: %s", got)
 	}
+	if got := resp.FDVInSOL.String(); got != "28.4462507" {
+		t.Fatalf("unexpected fdv in SOL: %s", got)
+	}
 }
 
 func TestComputeValidationAndErrors(t *testing.T) {

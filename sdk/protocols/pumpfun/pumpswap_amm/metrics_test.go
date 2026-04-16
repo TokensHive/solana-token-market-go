@@ -170,8 +170,11 @@ func TestCompute_UsesDirectPoolAndVaultAccounts(t *testing.T) {
 	if got := resp.MarketCapInSOL.String(); got != "4000" {
 		t.Fatalf("unexpected market_cap_in_sol: %s", got)
 	}
-	if mockRPCClient.getAccountCalls != 1 {
-		t.Fatalf("expected one getAccount call, got %d", mockRPCClient.getAccountCalls)
+	if got := resp.FDVInSOL.String(); got != "5000" {
+		t.Fatalf("unexpected fdv_in_sol: %s", got)
+	}
+	if mockRPCClient.getAccountCalls != 2 {
+		t.Fatalf("expected two getAccount calls (pool + fdv lookup), got %d", mockRPCClient.getAccountCalls)
 	}
 	if mockRPCClient.getMultipleCalls != 1 {
 		t.Fatalf("expected one getMultipleAccounts call, got %d", mockRPCClient.getMultipleCalls)

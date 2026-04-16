@@ -29,6 +29,7 @@ type Result struct {
 	LiquidityInB      decimal.Decimal
 	LiquidityInSOL    decimal.Decimal
 	MarketCapInSOL    decimal.Decimal
+	FDVInSOL          decimal.Decimal
 	TotalSupply       decimal.Decimal
 	CirculatingSupply decimal.Decimal
 	SupplyMethod      string
@@ -71,12 +72,14 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 	priceOfAInSOL, priceOfAInB, liquidityInB := c.computePairMetrics(ctx, req.MintA, req.MintB, priceTokenInSOL, liquiditySOL)
 
 	marketCapInSOL := priceOfAInSOL.Mul(totalSupply)
+	fdvInSOL := priceOfAInSOL.Mul(totalSupply)
 	return &Result{
 		PriceOfAInB:       priceOfAInB,
 		PriceOfAInSOL:     priceOfAInSOL,
 		LiquidityInB:      liquidityInB,
 		LiquidityInSOL:    liquiditySOL,
 		MarketCapInSOL:    marketCapInSOL,
+		FDVInSOL:          fdvInSOL,
 		TotalSupply:       totalSupply,
 		CirculatingSupply: circulatingSupply,
 		SupplyMethod:      "pumpfun_curve_state",
@@ -88,6 +91,8 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 			"virtual_sol_reserve":   state.virtualSOLReserve.String(),
 			"real_token_reserve":    state.realTokenReserve.String(),
 			"real_sol_reserve":      state.realSOLReserve.String(),
+			"fdv_supply":            totalSupply.String(),
+			"fdv_method":            "pumpfun_curve_token_total_supply",
 		},
 	}, nil
 }

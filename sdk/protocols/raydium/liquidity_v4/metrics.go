@@ -1,9 +1,10 @@
-package pumpswap_amm
+package liquidity_v4
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/parallelx"
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/pubkeyx"
@@ -15,17 +16,25 @@ import (
 )
 
 const (
-	poolBaseMintOffset      = 43
-	poolQuoteMintOffset     = 75
-	poolBaseVaultOffset     = 139
-	poolQuoteVaultOffset    = 171
-	poolExpectedMinDataSize = 243
+	liquidityStateV4MinDataSize = 752
 
-	tokenAmountOffset       = 64
-	tokenAccountMinDataSize = 72
+	baseDecimalOffset      = 32
+	quoteDecimalOffset     = 40
+	baseNeedTakePnlOffset  = 192
+	quoteNeedTakePnlOffset = 200
+	baseVaultOffset        = 336
+	quoteVaultOffset       = 368
+	baseMintOffset         = 400
+	quoteMintOffset        = 432
+	openOrdersOffset       = 496
+	marketProgramIDOffset  = 560
 
-	mintDecimalsOffset     = 44
-	mintAccountMinDataSize = 45
+	tokenAccountAmountOffset = 64
+	tokenAccountMinDataSize  = 72
+
+	openOrdersBaseTotalOffset  = 85
+	openOrdersQuoteTotalOffset = 101
+	openOrdersMinDataSize      = 109
 )
 
 type Calculator struct {
@@ -54,17 +63,23 @@ type Result struct {
 }
 
 type poolState struct {
-	baseMint   solana.PublicKey
-	quoteMint  solana.PublicKey
-	baseVault  solana.PublicKey
-	quoteVault solana.PublicKey
+	baseMint         solana.PublicKey
+	quoteMint        solana.PublicKey
+	baseVault        solana.PublicKey
+	quoteVault       solana.PublicKey
+	openOrders       solana.PublicKey
+	marketProgramID  solana.PublicKey
+	baseDecimals     uint8
+	quoteDecimals    uint8
+	baseNeedTakePnl  uint64
+	quoteNeedTakePnl uint64
 }
 
 type reserveSnapshot struct {
-	BaseMint     string
-	BaseReserve  decimal.Decimal
-	QuoteMint    string
-	QuoteReserve decimal.Decimal
+	baseMint     solana.PublicKey
+	quoteMint    solana.PublicKey
+	baseReserve  decimal.Decimal
+	quoteReserve decimal.Decimal
 }
 
 func NewCalculator(rpcClient rpc.Client, quoteBridge quote.Bridge, supplyProvider supply.Provider) *Calculator {
@@ -114,13 +129,12 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 	accounts, err := c.rpc.GetMultipleAccounts(ctx, []solana.PublicKey{
 		state.baseVault,
 		state.quoteVault,
-		state.baseMint,
-		state.quoteMint,
+		state.openOrders,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if len(accounts) != 4 {
+	if len(accounts) != 3 {
 		return nil, fmt.Errorf("unexpected account batch size: %d", len(accounts))
 	}
 	for idx, acc := range accounts {
@@ -129,30 +143,39 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 		}
 	}
 
-	baseReserveRaw, err := decodeTokenAmount(accounts[0].Data)
+	baseVaultAmountRaw, err := decodeTokenAmount(accounts[0].Data)
 	if err != nil {
 		return nil, fmt.Errorf("decode base vault amount: %w", err)
 	}
-	quoteReserveRaw, err := decodeTokenAmount(accounts[1].Data)
+	quoteVaultAmountRaw, err := decodeTokenAmount(accounts[1].Data)
 	if err != nil {
 		return nil, fmt.Errorf("decode quote vault amount: %w", err)
 	}
-	baseDecimals, err := decodeMintDecimals(accounts[2].Data)
+	openOrdersBaseRaw, openOrdersQuoteRaw, err := decodeOpenOrdersTotals(accounts[2].Data)
 	if err != nil {
-		return nil, fmt.Errorf("decode base mint decimals: %w", err)
+		return nil, fmt.Errorf("decode open orders totals: %w", err)
 	}
-	quoteDecimals, err := decodeMintDecimals(accounts[3].Data)
-	if err != nil {
-		return nil, fmt.Errorf("decode quote mint decimals: %w", err)
+
+	baseReserve := decimalFromU64(baseVaultAmountRaw, state.baseDecimals).
+		Add(decimalFromU64(openOrdersBaseRaw, state.baseDecimals)).
+		Sub(decimalFromU64(state.baseNeedTakePnl, state.baseDecimals))
+	if baseReserve.IsNegative() {
+		baseReserve = decimal.Zero
+	}
+	quoteReserve := decimalFromU64(quoteVaultAmountRaw, state.quoteDecimals).
+		Add(decimalFromU64(openOrdersQuoteRaw, state.quoteDecimals)).
+		Sub(decimalFromU64(state.quoteNeedTakePnl, state.quoteDecimals))
+	if quoteReserve.IsNegative() {
+		quoteReserve = decimal.Zero
 	}
 
 	snapshot := &reserveSnapshot{
-		BaseMint:     state.baseMint.String(),
-		BaseReserve:  decimalFromU64(baseReserveRaw, baseDecimals),
-		QuoteMint:    state.quoteMint.String(),
-		QuoteReserve: decimalFromU64(quoteReserveRaw, quoteDecimals),
+		baseMint:     state.baseMint,
+		quoteMint:    state.quoteMint,
+		baseReserve:  baseReserve,
+		quoteReserve: quoteReserve,
 	}
-	if snapshot.BaseReserve.IsZero() || snapshot.QuoteReserve.IsZero() {
+	if snapshot.baseReserve.IsZero() || snapshot.quoteReserve.IsZero() {
 		return nil, fmt.Errorf("pool reserves are zero")
 	}
 
@@ -205,31 +228,64 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 		CirculatingSupply: circulatingSupply,
 		SupplyMethod:      supplyMethod,
 		Metadata: map[string]any{
-			"dex":                "pumpfun",
-			"pool_version":       "pumpswap_amm",
-			"source":             "pumpswap_pool_account",
-			"pool_base_mint":     snapshot.BaseMint,
-			"pool_quote_mint":    snapshot.QuoteMint,
-			"pool_base_reserve":  snapshot.BaseReserve.String(),
-			"pool_quote_reserve": snapshot.QuoteReserve.String(),
-			"pool_base_vault":    state.baseVault.String(),
-			"pool_quote_vault":   state.quoteVault.String(),
-			"fdv_supply":         fdvSupply.String(),
-			"fdv_method":         fdvMethod,
+			"dex":                      "raydium",
+			"pool_version":             "liquidity_v4",
+			"source":                   "raydium_pool_v4_account",
+			"pool_base_mint":           state.baseMint.String(),
+			"pool_quote_mint":          state.quoteMint.String(),
+			"pool_base_vault":          state.baseVault.String(),
+			"pool_quote_vault":         state.quoteVault.String(),
+			"pool_open_orders":         state.openOrders.String(),
+			"pool_market_program_id":   state.marketProgramID.String(),
+			"pool_base_decimal":        state.baseDecimals,
+			"pool_quote_decimal":       state.quoteDecimals,
+			"pool_base_need_take_pnl":  decimalFromU64(state.baseNeedTakePnl, state.baseDecimals).String(),
+			"pool_quote_need_take_pnl": decimalFromU64(state.quoteNeedTakePnl, state.quoteDecimals).String(),
+			"pool_base_reserve":        snapshot.baseReserve.String(),
+			"pool_quote_reserve":       snapshot.quoteReserve.String(),
+			"fdv_supply":               fdvSupply.String(),
+			"fdv_method":               fdvMethod,
 		},
 	}, nil
 }
 
 func decodePoolState(data []byte) (poolState, error) {
-	if len(data) < poolExpectedMinDataSize {
-		return poolState{}, fmt.Errorf("invalid pumpswap pool data length: %d", len(data))
+	if len(data) < liquidityStateV4MinDataSize {
+		return poolState{}, fmt.Errorf("invalid raydium liquidity v4 pool data length: %d", len(data))
+	}
+	baseDecimal := binary.LittleEndian.Uint64(data[baseDecimalOffset : baseDecimalOffset+8])
+	quoteDecimal := binary.LittleEndian.Uint64(data[quoteDecimalOffset : quoteDecimalOffset+8])
+	if baseDecimal > 255 || quoteDecimal > 255 {
+		return poolState{}, fmt.Errorf("invalid pool decimals: base=%d quote=%d", baseDecimal, quoteDecimal)
 	}
 	return poolState{
-		baseMint:   solana.PublicKeyFromBytes(data[poolBaseMintOffset : poolBaseMintOffset+32]),
-		quoteMint:  solana.PublicKeyFromBytes(data[poolQuoteMintOffset : poolQuoteMintOffset+32]),
-		baseVault:  solana.PublicKeyFromBytes(data[poolBaseVaultOffset : poolBaseVaultOffset+32]),
-		quoteVault: solana.PublicKeyFromBytes(data[poolQuoteVaultOffset : poolQuoteVaultOffset+32]),
+		baseMint:         solana.PublicKeyFromBytes(data[baseMintOffset : baseMintOffset+32]),
+		quoteMint:        solana.PublicKeyFromBytes(data[quoteMintOffset : quoteMintOffset+32]),
+		baseVault:        solana.PublicKeyFromBytes(data[baseVaultOffset : baseVaultOffset+32]),
+		quoteVault:       solana.PublicKeyFromBytes(data[quoteVaultOffset : quoteVaultOffset+32]),
+		openOrders:       solana.PublicKeyFromBytes(data[openOrdersOffset : openOrdersOffset+32]),
+		marketProgramID:  solana.PublicKeyFromBytes(data[marketProgramIDOffset : marketProgramIDOffset+32]),
+		baseDecimals:     uint8(baseDecimal),
+		quoteDecimals:    uint8(quoteDecimal),
+		baseNeedTakePnl:  binary.LittleEndian.Uint64(data[baseNeedTakePnlOffset : baseNeedTakePnlOffset+8]),
+		quoteNeedTakePnl: binary.LittleEndian.Uint64(data[quoteNeedTakePnlOffset : quoteNeedTakePnlOffset+8]),
 	}, nil
+}
+
+func decodeTokenAmount(data []byte) (uint64, error) {
+	if len(data) < tokenAccountMinDataSize {
+		return 0, fmt.Errorf("invalid token account data length: %d", len(data))
+	}
+	return binary.LittleEndian.Uint64(data[tokenAccountAmountOffset : tokenAccountAmountOffset+8]), nil
+}
+
+func decodeOpenOrdersTotals(data []byte) (uint64, uint64, error) {
+	if len(data) < openOrdersMinDataSize {
+		return 0, 0, fmt.Errorf("invalid open orders data length: %d", len(data))
+	}
+	baseTotal := binary.LittleEndian.Uint64(data[openOrdersBaseTotalOffset : openOrdersBaseTotalOffset+8])
+	quoteTotal := binary.LittleEndian.Uint64(data[openOrdersQuoteTotalOffset : openOrdersQuoteTotalOffset+8])
+	return baseTotal, quoteTotal, nil
 }
 
 func poolMatchesRequest(req Request, state poolState) bool {
@@ -237,29 +293,15 @@ func poolMatchesRequest(req Request, state poolState) bool {
 		(mintsEquivalent(req.MintA, state.quoteMint) && mintsEquivalent(req.MintB, state.baseMint))
 }
 
-func decodeTokenAmount(data []byte) (uint64, error) {
-	if len(data) < tokenAccountMinDataSize {
-		return 0, fmt.Errorf("invalid token account data length: %d", len(data))
-	}
-	return binary.LittleEndian.Uint64(data[tokenAmountOffset : tokenAmountOffset+8]), nil
-}
-
-func decodeMintDecimals(data []byte) (uint8, error) {
-	if len(data) < mintAccountMinDataSize {
-		return 0, fmt.Errorf("invalid mint account data length: %d", len(data))
-	}
-	return data[mintDecimalsOffset], nil
-}
-
 func priceOfMintAInMintB(req Request, snapshot *reserveSnapshot) decimal.Decimal {
-	if snapshot == nil || snapshot.BaseReserve.IsZero() || snapshot.QuoteReserve.IsZero() {
+	if snapshot == nil || snapshot.baseReserve.IsZero() || snapshot.quoteReserve.IsZero() {
 		return decimal.Zero
 	}
 	switch {
-	case mintStringMatchesReq(snapshot.BaseMint, req.MintA) && mintStringMatchesReq(snapshot.QuoteMint, req.MintB):
-		return snapshot.QuoteReserve.Div(snapshot.BaseReserve)
-	case mintStringMatchesReq(snapshot.QuoteMint, req.MintA) && mintStringMatchesReq(snapshot.BaseMint, req.MintB):
-		return snapshot.BaseReserve.Div(snapshot.QuoteReserve)
+	case mintsEquivalent(req.MintA, snapshot.baseMint) && mintsEquivalent(req.MintB, snapshot.quoteMint):
+		return snapshot.quoteReserve.Div(snapshot.baseReserve)
+	case mintsEquivalent(req.MintA, snapshot.quoteMint) && mintsEquivalent(req.MintB, snapshot.baseMint):
+		return snapshot.baseReserve.Div(snapshot.quoteReserve)
 	default:
 		return decimal.Zero
 	}
@@ -270,10 +312,10 @@ func liquidityInMintB(req Request, snapshot *reserveSnapshot) decimal.Decimal {
 		return decimal.Zero
 	}
 	switch {
-	case mintStringMatchesReq(snapshot.QuoteMint, req.MintB):
-		return snapshot.QuoteReserve.Mul(decimal.NewFromInt(2))
-	case mintStringMatchesReq(snapshot.BaseMint, req.MintB):
-		return snapshot.BaseReserve.Mul(decimal.NewFromInt(2))
+	case mintsEquivalent(req.MintB, snapshot.quoteMint):
+		return snapshot.quoteReserve.Mul(decimal.NewFromInt(2))
+	case mintsEquivalent(req.MintB, snapshot.baseMint):
+		return snapshot.baseReserve.Mul(decimal.NewFromInt(2))
 	default:
 		return decimal.Zero
 	}
@@ -310,15 +352,8 @@ func (c *Calculator) liquidityInSOL(ctx context.Context, req Request, liquidityI
 }
 
 func decimalFromU64(v uint64, decimals uint8) decimal.Decimal {
-	return decimal.NewFromInt(int64(v)).Shift(-int32(decimals))
-}
-
-func mintStringMatchesReq(snapshotMint string, reqMint solana.PublicKey) bool {
-	pk, err := solana.PublicKeyFromBase58(snapshotMint)
-	if err != nil {
-		return false
-	}
-	return mintsEquivalent(reqMint, pk)
+	n := new(big.Int).SetUint64(v)
+	return decimal.NewFromBigInt(n, -int32(decimals))
 }
 
 func mintsEquivalent(a, b solana.PublicKey) bool {
