@@ -494,6 +494,24 @@ func TestMintComparisonHelpers(t *testing.T) {
 	}
 }
 
+func TestPoolMatchesRequest(t *testing.T) {
+	token := solana.MustPublicKeyFromBase58("11111111111111111111111111111111")
+	other := solana.MustPublicKeyFromBase58("SysvarRent111111111111111111111111111111111")
+	state := poolState{
+		baseMint:  solana.SolMint,
+		quoteMint: token,
+	}
+	if !poolMatchesRequest(Request{MintA: solana.SolMint, MintB: token}, state) {
+		t.Fatal("expected direct request orientation to match pool")
+	}
+	if !poolMatchesRequest(Request{MintA: token, MintB: solana.SolMint}, state) {
+		t.Fatal("expected inverted request orientation to match pool")
+	}
+	if poolMatchesRequest(Request{MintA: other, MintB: token}, state) {
+		t.Fatal("expected mismatched mint request to fail")
+	}
+}
+
 func TestComputeDecodeAndAccountStateErrors(t *testing.T) {
 	pool := solana.MustPublicKeyFromBase58("HnhpJPJgBG2KwniMTNW8cVBHvk1hFog3RC3kjnyc23tD")
 	mint := solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")

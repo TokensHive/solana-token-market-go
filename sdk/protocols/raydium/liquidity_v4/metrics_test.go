@@ -595,6 +595,24 @@ func TestDecodeHelpersAndMathHelpers(t *testing.T) {
 	}
 }
 
+func TestPoolMatchesRequest(t *testing.T) {
+	token := solana.MustPublicKeyFromBase58("11111111111111111111111111111111")
+	other := solana.MustPublicKeyFromBase58("SysvarRent111111111111111111111111111111111")
+	state := poolState{
+		baseMint:  solana.SolMint,
+		quoteMint: token,
+	}
+	if !poolMatchesRequest(Request{MintA: solana.SolMint, MintB: token}, state) {
+		t.Fatal("expected direct request orientation to match pool")
+	}
+	if !poolMatchesRequest(Request{MintA: token, MintB: solana.SolMint}, state) {
+		t.Fatal("expected inverted request orientation to match pool")
+	}
+	if poolMatchesRequest(Request{MintA: other, MintB: token}, state) {
+		t.Fatal("expected mismatched mint request to fail")
+	}
+}
+
 func TestSOLAndQuoteConversions(t *testing.T) {
 	calc := NewCalculator(&mockRPC{}, nil, &mockSupply{})
 	priceInSOL, err := calc.priceOfMintAInSOL(context.Background(), Request{

@@ -148,6 +148,97 @@ func TestGetMetricsByPumpfunBondingCurve(t *testing.T) {
 	}
 }
 
+func TestGetMetricsByPumpfunBondingCurve_WhenMintAIsSOL(t *testing.T) {
+	data := make([]byte, 64)
+	binary.LittleEndian.PutUint64(data[8:16], 1063770573068395)
+	binary.LittleEndian.PutUint64(data[16:24], 30260284408)
+	binary.LittleEndian.PutUint64(data[24:32], 783870573068395)
+	binary.LittleEndian.PutUint64(data[32:40], 260284408)
+	binary.LittleEndian.PutUint64(data[40:48], 1000000000000000)
+
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getAccountFn: func(context.Context, solana.PublicKey) (*rpc.AccountInfo, error) {
+				return &rpc.AccountInfo{Exists: true, Data: data}, nil
+			},
+		},
+	})
+
+	tokenMint := solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")
+	resp, err := service.GetMetricsByPumpfunBondingCurve(context.Background(), GetMetricsByPumpfunBondingCurveRequest{
+		MintA: solana.SolMint,
+		MintB: tokenMint,
+	})
+	if err != nil {
+		t.Fatalf("expected successful bonding curve response when mintA is SOL, got %v", err)
+	}
+	if !resp.MintA.Equals(solana.SolMint) || !resp.MintB.Equals(tokenMint) {
+		t.Fatalf("unexpected mint orientation in response: mintA=%s mintB=%s", resp.MintA, resp.MintB)
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurveErrors(t *testing.T) {
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getAccountFn: func(context.Context, solana.PublicKey) (*rpc.AccountInfo, error) {
+				return &rpc.AccountInfo{Exists: false}, nil
+			},
+		},
+	})
+	_, err := service.GetMetricsByPumpfunBondingCurve(context.Background(), GetMetricsByPumpfunBondingCurveRequest{
+		MintA: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+		MintB: solana.SolMint,
+	})
+	if err == nil {
+		t.Fatal("expected bonding curve compute error")
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurveValidationError(t *testing.T) {
+	service := NewService(defaultConfig())
+	_, err := service.GetMetricsByPumpfunBondingCurve(context.Background(), GetMetricsByPumpfunBondingCurveRequest{})
+	if err == nil {
+		t.Fatal("expected validation error for empty bonding curve request")
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurveDeriveAddressError(t *testing.T) {
+	originalFindProgramAddress := findProgramAddress
+	findProgramAddress = func(_ [][]byte, _ solana.PublicKey) (solana.PublicKey, uint8, error) {
+		return solana.PublicKey{}, 0, errors.New("derive failed")
+	}
+	defer func() {
+		findProgramAddress = originalFindProgramAddress
+	}()
+
+	service := NewService(defaultConfig())
+	_, err := service.GetMetricsByPumpfunBondingCurve(context.Background(), GetMetricsByPumpfunBondingCurveRequest{
+		MintA: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+		MintB: solana.SolMint,
+	})
+	if err == nil {
+		t.Fatal("expected derive-address error")
+	}
+}
+
+func TestValidatePumpfunBondingCurveRequest(t *testing.T) {
+	if err := validatePumpfunBondingCurveRequest(GetMetricsByPumpfunBondingCurveRequest{}); err == nil {
+		t.Fatal("expected mint-required validation error")
+	}
+	if err := validatePumpfunBondingCurveRequest(GetMetricsByPumpfunBondingCurveRequest{
+		MintA: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+		MintB: solana.MustPublicKeyFromBase58("SysvarRent111111111111111111111111111111111"),
+	}); err == nil {
+		t.Fatal("expected SOL-side validation error")
+	}
+	if err := validatePumpfunBondingCurveRequest(GetMetricsByPumpfunBondingCurveRequest{
+		MintA: solana.SolMint,
+		MintB: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+	}); err != nil {
+		t.Fatalf("expected valid request when one side is SOL, got %v", err)
+	}
+}
+
 func TestGetMetricsByPool_RejectsBondingCurveRoute(t *testing.T) {
 	service := NewService(defaultConfig())
 	_, err := service.GetMetricsByPool(context.Background(), GetMetricsByPoolRequest{

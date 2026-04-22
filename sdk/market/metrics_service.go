@@ -21,6 +21,7 @@ import (
 const pumpfunBondingCurveSeed = "bonding-curve"
 
 var pumpfunProgramID = solana.MustPublicKeyFromBase58("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")
+var findProgramAddress = solana.FindProgramAddress
 
 func (c *Client) GetMetricsByPool(ctx context.Context, req GetMetricsByPoolRequest) (*GetMetricsByPoolResponse, error) {
 	ctx, recorder := c.startDebug(ctx, "GetMetricsByPool")
@@ -72,7 +73,7 @@ func (s *Service) GetMetricsByPumpfunBondingCurve(ctx context.Context, req GetMe
 	if solana.SolMint.Equals(req.MintA) {
 		tokenMint = req.MintB
 	}
-	poolAddress, _, err := solana.FindProgramAddress([][]byte{
+	poolAddress, _, err := findProgramAddress([][]byte{
 		[]byte(pumpfunBondingCurveSeed),
 		tokenMint.Bytes(),
 	}, pumpfunProgramID)

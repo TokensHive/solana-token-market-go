@@ -22,6 +22,14 @@ type fakeClient struct {
 	debug map[string]any
 }
 
+type fakeBondingCurveClient struct {
+	poolResp    *market.GetMetricsByPoolResponse
+	poolErr     error
+	bondingResp *market.GetMetricsByPoolResponse
+	bondingErr  error
+	debug       map[string]any
+}
+
 type flakyClient struct {
 	calls int
 }
@@ -173,6 +181,30 @@ func (f *fakeClient) GetMetricsByPool(context.Context, market.GetMetricsByPoolRe
 }
 
 func (f *fakeClient) LastRequestDebug() map[string]any {
+	return f.debug
+}
+
+func (f *fakeBondingCurveClient) GetMetricsByPool(context.Context, market.GetMetricsByPoolRequest) (*market.GetMetricsByPoolResponse, error) {
+	if f.poolErr != nil {
+		return nil, f.poolErr
+	}
+	if f.poolResp != nil {
+		return f.poolResp, nil
+	}
+	return &market.GetMetricsByPoolResponse{}, nil
+}
+
+func (f *fakeBondingCurveClient) GetMetricsByPumpfunBondingCurve(context.Context, market.GetMetricsByPumpfunBondingCurveRequest) (*market.GetMetricsByPoolResponse, error) {
+	if f.bondingErr != nil {
+		return nil, f.bondingErr
+	}
+	if f.bondingResp != nil {
+		return f.bondingResp, nil
+	}
+	return &market.GetMetricsByPoolResponse{}, nil
+}
+
+func (f *fakeBondingCurveClient) LastRequestDebug() map[string]any {
 	return f.debug
 }
 
@@ -403,6 +435,70 @@ func TestRunWithPresetAndBuildRequest(t *testing.T) {
 	}
 }
 
+func TestBuildBondingCurveRequestSuccess(t *testing.T) {
+	mintA := solana.SolMint
+	mintB := mustPubkey(t, "9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")
+	req, err := buildBondingCurveRequest(poolPreset{
+		Name:  "ok",
+		MintA: mintA.String(),
+		MintB: mintB.String(),
+	})
+	if err != nil {
+		t.Fatalf("expected valid bonding curve request, got %v", err)
+	}
+	if !req.MintA.Equals(mintA) || !req.MintB.Equals(mintB) {
+		t.Fatalf("unexpected bonding curve request mints: %+v", req)
+	}
+}
+
+func TestRunWithPresetUsesBondingCurveClient(t *testing.T) {
+	client := &fakeBondingCurveClient{
+		bondingResp: &market.GetMetricsByPoolResponse{
+			Pool: market.PoolIdentifier{
+				PoolAddress: solana.SolMint,
+			},
+			MintA: solana.SolMint,
+			MintB: mustPubkey(t, "9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+		},
+	}
+	out := bytes.NewBuffer(nil)
+
+	if err := runWithPreset(client, time.Second, bondingCurvePreset, false, out); err != nil {
+		t.Fatalf("expected successful bonding curve preset run, got %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "version=bonding_curve") || !strings.Contains(output, "pool=") {
+		t.Fatalf("expected bonding curve output path, got: %s", output)
+	}
+}
+
+func TestRunWithPresetBondingCurveValidationBranches(t *testing.T) {
+	out := bytes.NewBuffer(nil)
+
+	err := runWithPreset(&fakeBondingCurveClient{}, time.Second, poolPreset{
+		Name:        "bad-bonding-client",
+		Dex:         market.DexPumpfun,
+		PoolVersion: market.PoolVersionPumpfunBondingCurve,
+		MintA:       "bad",
+		MintB:       solana.SolMint.String(),
+	}, false, out)
+	if err == nil {
+		t.Fatal("expected bonding curve request build error")
+	}
+
+	err = runWithPreset(&fakeClient{}, time.Second, poolPreset{
+		Name:        "bad-bonding-fallback",
+		Dex:         market.DexPumpfun,
+		PoolVersion: market.PoolVersionPumpfunBondingCurve,
+		MintA:       solana.SolMint.String(),
+		MintB:       "11111111111111111111111111111111",
+		PoolAddress: "bad",
+	}, false, out)
+	if err == nil {
+		t.Fatal("expected legacy fallback request build error")
+	}
+}
+
 func TestRunRequestDebugModes(t *testing.T) {
 	out := bytes.NewBuffer(nil)
 	req := market.GetMetricsByPoolRequest{
@@ -432,6 +528,59 @@ func TestRunRequestDebugModes(t *testing.T) {
 	}, time.Second, req, true, out)
 	if err == nil {
 		t.Fatal("expected debug marshal error")
+	}
+}
+
+func TestRunBondingCurveRequestDebugModes(t *testing.T) {
+	out := bytes.NewBuffer(nil)
+	req := market.GetMetricsByPumpfunBondingCurveRequest{
+		MintA: solana.SolMint,
+		MintB: mustPubkey(t, "9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+	}
+	resp := &market.GetMetricsByPoolResponse{
+		Pool: market.PoolIdentifier{
+			PoolAddress: solana.SolMint,
+		},
+		MintA: req.MintA,
+		MintB: req.MintB,
+		Metadata: map[string]any{
+			"fdv_method": "pumpfun_curve_state",
+			"fdv_supply": "1000000",
+		},
+	}
+
+	if err := runBondingCurveRequest(&fakeBondingCurveClient{
+		bondingResp: resp,
+	}, time.Second, req, false, out); err != nil {
+		t.Fatalf("expected successful bonding curve request without debug, got %v", err)
+	}
+
+	if err := runBondingCurveRequest(&fakeBondingCurveClient{
+		bondingResp: resp,
+		debug:       map[string]any{},
+	}, time.Second, req, true, out); err != nil {
+		t.Fatalf("expected successful bonding curve request with empty debug, got %v", err)
+	}
+
+	if err := runBondingCurveRequest(&fakeBondingCurveClient{
+		bondingResp: resp,
+		debug:       map[string]any{"ok": true},
+	}, time.Second, req, true, out); err != nil {
+		t.Fatalf("expected successful bonding curve request with debug payload, got %v", err)
+	}
+
+	err := runBondingCurveRequest(&fakeBondingCurveClient{
+		bondingResp: resp,
+		debug:       map[string]any{"bad": make(chan int)},
+	}, time.Second, req, true, out)
+	if err == nil {
+		t.Fatal("expected bonding curve debug marshal error")
+	}
+
+	if err := runBondingCurveRequest(&fakeBondingCurveClient{
+		bondingErr: errors.New("boom"),
+	}, time.Second, req, false, out); err == nil {
+		t.Fatal("expected bonding curve request error to be returned")
 	}
 }
 
