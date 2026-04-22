@@ -259,7 +259,7 @@ func TestCompute_ValidationAndPoolErrors(t *testing.T) {
 		t.Fatal("expected pool address required error")
 	}
 	if _, err := NewCalculator(&mockRPC{}, nil, &mockSupply{}).Compute(context.Background(), Request{PoolAddress: solana.SolMint}); err == nil {
-		t.Fatal("expected mint required error")
+		t.Fatal("expected pool not found")
 	}
 
 	calc := NewCalculator(&mockRPC{getAccountErr: errors.New("rpc failed")}, nil, &mockSupply{})
@@ -322,16 +322,7 @@ func TestCompute_BatchDecodeAndDownstreamErrors(t *testing.T) {
 		mintB.String():  {Address: mintB, Exists: true, Data: makeMintData(9)},
 	}
 
-	calc := NewCalculator(&mockRPC{accounts: baseAccounts}, nil, &mockSupply{})
-	if _, err := calc.Compute(context.Background(), Request{
-		PoolAddress: pool,
-		MintA:       testPubkey(99),
-		MintB:       mintB,
-	}); err == nil {
-		t.Fatal("expected pool mismatch error")
-	}
-
-	calc = NewCalculator(&mockRPC{
+	calc := NewCalculator(&mockRPC{
 		accounts:       baseAccounts,
 		getMultipleErr: errors.New("batch failed"),
 	}, nil, &mockSupply{})
@@ -426,17 +417,6 @@ func TestCompute_BatchDecodeAndDownstreamErrors(t *testing.T) {
 		MintB:       mintB,
 	}); err == nil {
 		t.Fatal("expected zero reserve error")
-	}
-
-	quoteErrCalc := NewCalculator(&mockRPC{accounts: baseAccounts}, &mockQuote{err: errors.New("quote error")}, &mockSupply{
-		total: decimal.NewFromInt(1), circ: decimal.NewFromInt(1), method: "ok",
-	})
-	if _, err := quoteErrCalc.Compute(context.Background(), Request{
-		PoolAddress: pool,
-		MintA:       mintA,
-		MintB:       testPubkey(77),
-	}); err == nil {
-		t.Fatal("expected quote conversion error")
 	}
 
 	supplyErrCalc := NewCalculator(&mockRPC{accounts: baseAccounts}, &mockQuote{value: decimal.NewFromInt(1)}, &mockSupply{err: errors.New("supply error")})

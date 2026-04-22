@@ -41,6 +41,8 @@ type Request struct {
 }
 
 type Result struct {
+	MintA             solana.PublicKey
+	MintB             solana.PublicKey
 	PriceOfAInB       decimal.Decimal
 	PriceOfAInSOL     decimal.Decimal
 	LiquidityInB      decimal.Decimal
@@ -85,9 +87,6 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 	if req.PoolAddress.IsZero() {
 		return nil, fmt.Errorf("pool address is required")
 	}
-	if req.MintA.IsZero() || req.MintB.IsZero() {
-		return nil, fmt.Errorf("mintA and mintB are required")
-	}
 
 	poolInfo, err := c.rpc.GetAccount(ctx, req.PoolAddress)
 	if err != nil {
@@ -101,14 +100,10 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 	if err != nil {
 		return nil, err
 	}
-	if !poolMatchesRequest(req, state) {
-		return nil, fmt.Errorf(
-			"pool mint mismatch: request=(%s,%s) pool=(%s,%s)",
-			req.MintA.String(),
-			req.MintB.String(),
-			state.baseMint.String(),
-			state.quoteMint.String(),
-		)
+	resolvedReq := Request{
+		PoolAddress: req.PoolAddress,
+		MintA:       state.baseMint,
+		MintB:       state.quoteMint,
 	}
 
 	accounts, err := c.rpc.GetMultipleAccounts(ctx, []solana.PublicKey{
@@ -156,8 +151,8 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 		return nil, fmt.Errorf("pool reserves are zero")
 	}
 
-	priceAInB := priceOfMintAInMintB(req, snapshot)
-	liquidityInB := liquidityInMintB(req, snapshot)
+	priceAInB := priceOfMintAInMintB(resolvedReq, snapshot)
+	liquidityInB := liquidityInMintB(resolvedReq, snapshot)
 
 	var (
 		priceAInSOL       decimal.Decimal
@@ -171,20 +166,20 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 	err = parallelx.Run(ctx,
 		func(taskCtx context.Context) error {
 			var convErr error
-			priceAInSOL, convErr = c.priceOfMintAInSOL(taskCtx, req, priceAInB)
+			priceAInSOL, convErr = c.priceOfMintAInSOL(taskCtx, resolvedReq, priceAInB)
 			if convErr != nil {
 				return convErr
 			}
-			liquidityInSOL, convErr = c.liquidityInSOL(taskCtx, req, liquidityInB)
+			liquidityInSOL, convErr = c.liquidityInSOL(taskCtx, resolvedReq, liquidityInB)
 			return convErr
 		},
 		func(taskCtx context.Context) error {
 			var supplyErr error
-			totalSupply, circulatingSupply, supplyMethod, supplyErr = c.supply.GetSupply(taskCtx, req.MintA)
+			totalSupply, circulatingSupply, supplyMethod, supplyErr = c.supply.GetSupply(taskCtx, resolvedReq.MintA)
 			if supplyErr != nil {
 				return supplyErr
 			}
-			fdvSupply, fdvMethod = supply.ResolveFDVSupply(taskCtx, c.rpc, req.MintA, totalSupply)
+			fdvSupply, fdvMethod = supply.ResolveFDVSupply(taskCtx, c.rpc, resolvedReq.MintA, totalSupply)
 			return nil
 		},
 	)
@@ -195,6 +190,8 @@ func (c *Calculator) Compute(ctx context.Context, req Request) (*Result, error) 
 	fdvInSOL := priceAInSOL.Mul(fdvSupply)
 
 	return &Result{
+		MintA:             resolvedReq.MintA,
+		MintB:             resolvedReq.MintB,
 		PriceOfAInB:       priceAInB,
 		PriceOfAInSOL:     priceAInSOL,
 		LiquidityInB:      liquidityInB,

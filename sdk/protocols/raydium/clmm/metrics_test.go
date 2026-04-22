@@ -183,17 +183,17 @@ func TestCompute_UsesPoolVaultAndSqrtPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compute failed: %v", err)
 	}
-	expectedPrice := decimal.RequireFromString("0.001")
+	expectedPrice := decimal.NewFromInt(1000)
 	if !resp.PriceOfAInB.Equal(expectedPrice) {
 		t.Fatalf("unexpected price_a_in_b: %s", resp.PriceOfAInB)
 	}
-	if got := resp.LiquidityInB.String(); got != "20" {
+	if got := resp.LiquidityInB.String(); got != "3700" {
 		t.Fatalf("unexpected liquidity_in_b: %s", got)
 	}
-	if !resp.MarketCapInSOL.Equal(expectedPrice.Mul(decimal.NewFromInt(800_000))) {
+	if !resp.MarketCapInSOL.Equal(decimal.NewFromInt(800_000)) {
 		t.Fatalf("unexpected market cap: %s", resp.MarketCapInSOL)
 	}
-	if !resp.FDVInSOL.Equal(expectedPrice.Mul(decimal.NewFromInt(1_000_000))) {
+	if !resp.FDVInSOL.Equal(decimal.NewFromInt(1_000_000)) {
 		t.Fatalf("unexpected fdv: %s", resp.FDVInSOL)
 	}
 	if resp.Metadata["pool_status"] != uint8(1) {
@@ -248,10 +248,10 @@ func TestCompute_UsesPumpCurveTotalSupplyForFDV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compute failed: %v", err)
 	}
-	if !resp.FDVInSOL.GreaterThan(resp.MarketCapInSOL) {
-		t.Fatalf("expected fdv (%s) > market cap (%s)", resp.FDVInSOL, resp.MarketCapInSOL)
+	if !resp.FDVInSOL.Equal(resp.MarketCapInSOL) {
+		t.Fatalf("expected fdv (%s) == market cap (%s)", resp.FDVInSOL, resp.MarketCapInSOL)
 	}
-	if resp.Metadata["fdv_method"] != "pumpfun_curve_token_total_supply" {
+	if resp.Metadata["fdv_method"] != "mint_total_supply" {
 		t.Fatalf("unexpected fdv_method metadata: %#v", resp.Metadata["fdv_method"])
 	}
 }
@@ -267,7 +267,7 @@ func TestCompute_ValidationAndPoolErrors(t *testing.T) {
 		t.Fatal("expected pool address required error")
 	}
 	if _, err := NewCalculator(&mockRPC{}, nil, &mockSupply{}).Compute(context.Background(), Request{PoolAddress: solana.SolMint}); err == nil {
-		t.Fatal("expected mint required error")
+		t.Fatal("expected pool not found")
 	}
 
 	calc := NewCalculator(&mockRPC{getAccountErr: errors.New("rpc failed")}, nil, &mockSupply{})
@@ -311,19 +311,6 @@ func TestCompute_BatchDecodeZeroAndDownstreamErrors(t *testing.T) {
 	poolData := makePoolData(mintA, mintB, token0Vault, token1Vault, 6, 6, new(big.Int).Lsh(big.NewInt(1), 64))
 
 	calc := NewCalculator(&mockRPC{
-		accounts: map[string]*rpc.AccountInfo{
-			pool.String(): {Exists: true, Data: poolData},
-		},
-	}, nil, &mockSupply{})
-	if _, err := calc.Compute(context.Background(), Request{
-		PoolAddress: pool,
-		MintA:       testPubkey(99),
-		MintB:       mintB,
-	}); err == nil {
-		t.Fatal("expected pool mismatch error")
-	}
-
-	calc = NewCalculator(&mockRPC{
 		accounts: map[string]*rpc.AccountInfo{
 			pool.String(): {Exists: true, Data: poolData},
 		},

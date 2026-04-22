@@ -1,5 +1,8 @@
 # Pump.fun `bonding_curve`
 
+> Public API routing note: use `GetMetricsByPumpfunBondingCurve` (mint-based request).
+> `GetMetricsByPool` is pool-address-only and cannot support `bonding_curve` directly because this account layout does not include token mint fields.
+
 ## Protocol and IDL
 
 | Item | Value |

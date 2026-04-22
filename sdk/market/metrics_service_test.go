@@ -76,8 +76,6 @@ func TestValidateMetricsRequest(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexPumpfun,
 			PoolVersion: PoolVersionPumpfunBondingCurve,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	}
@@ -89,7 +87,6 @@ func TestValidateMetricsRequest(t *testing.T) {
 		{},
 		{Pool: PoolIdentifier{Dex: DexPumpfun}},
 		{Pool: PoolIdentifier{Dex: DexPumpfun, PoolVersion: PoolVersionPumpfunBondingCurve}},
-		{Pool: PoolIdentifier{Dex: DexPumpfun, PoolVersion: PoolVersionPumpfunBondingCurve, PoolAddress: solana.SolMint}},
 	}
 	for i, req := range tests {
 		if err := validateMetricsRequest(req); err == nil {
@@ -104,8 +101,6 @@ func TestGetMetricsByPool_UnsupportedRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         Dex("unknown"),
 			PoolVersion: PoolVersion("v1"),
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -119,7 +114,7 @@ func TestGetMetricsByPool_UnsupportedRoute(t *testing.T) {
 	}
 }
 
-func TestDefaultPumpfunBondingCurveRoute(t *testing.T) {
+func TestGetMetricsByPumpfunBondingCurve(t *testing.T) {
 	data := make([]byte, 64)
 	binary.LittleEndian.PutUint64(data[8:16], 1063770573068395)
 	binary.LittleEndian.PutUint64(data[16:24], 30260284408)
@@ -135,14 +130,9 @@ func TestDefaultPumpfunBondingCurveRoute(t *testing.T) {
 		},
 	})
 
-	resp, err := service.GetMetricsByPool(context.Background(), GetMetricsByPoolRequest{
-		Pool: PoolIdentifier{
-			Dex:         DexPumpfun,
-			PoolVersion: PoolVersionPumpfunBondingCurve,
-			MintA:       solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
-			MintB:       solana.SolMint,
-			PoolAddress: solana.SolMint,
-		},
+	resp, err := service.GetMetricsByPumpfunBondingCurve(context.Background(), GetMetricsByPumpfunBondingCurveRequest{
+		MintA: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+		MintB: solana.SolMint,
 	})
 	if err != nil {
 		t.Fatalf("expected successful bonding curve response, got %v", err)
@@ -152,6 +142,23 @@ func TestDefaultPumpfunBondingCurveRoute(t *testing.T) {
 	}
 	if resp.FDVInSOL.IsZero() {
 		t.Fatal("expected non-zero FDV for bonding curve route")
+	}
+	if resp.Pool.PoolAddress.IsZero() {
+		t.Fatal("expected derived bonding curve pool address")
+	}
+}
+
+func TestGetMetricsByPool_RejectsBondingCurveRoute(t *testing.T) {
+	service := NewService(defaultConfig())
+	_, err := service.GetMetricsByPool(context.Background(), GetMetricsByPoolRequest{
+		Pool: PoolIdentifier{
+			Dex:         DexPumpfun,
+			PoolVersion: PoolVersionPumpfunBondingCurve,
+			PoolAddress: solana.SolMint,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected bonding curve rejection for GetMetricsByPool")
 	}
 }
 
@@ -202,8 +209,6 @@ func TestDefaultPumpfunAmmRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexPumpfun,
 			PoolVersion: PoolVersionPumpfunAmm,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -266,8 +271,6 @@ func TestDefaultRaydiumLiquidityV4Route(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumLiquidityV4,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -329,8 +332,6 @@ func TestDefaultRaydiumCPMMRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumCPMM,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -391,8 +392,6 @@ func TestDefaultRaydiumCLMMRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumCLMM,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -454,8 +453,6 @@ func TestDefaultRaydiumLaunchpadRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumLaunchpad,
-			MintA:       baseMint,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -519,8 +516,6 @@ func TestDefaultMeteoraDLMMRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDLMM,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -589,8 +584,6 @@ func TestDefaultMeteoraDBCRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDBC,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -696,8 +689,6 @@ func TestDefaultMeteoraDAMMV1Route(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDAMMV1,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -765,8 +756,6 @@ func TestDefaultMeteoraDAMMV2Route(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDAMMV2,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -835,8 +824,6 @@ func TestDefaultOrcaWhirlpoolRoute(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexOrca,
 			PoolVersion: PoolVersionOrcaWhirlpool,
-			MintA:       mintA,
-			MintB:       solana.SolMint,
 			PoolAddress: pool,
 		},
 	})
@@ -853,7 +840,7 @@ func TestCustomFactoryOverridesDefaultRoute(t *testing.T) {
 	client, err := NewClient(
 		WithPoolCalculatorFactory(PoolRoute{
 			Dex:         DexPumpfun,
-			PoolVersion: PoolVersionPumpfunBondingCurve,
+			PoolVersion: PoolVersionPumpfunAmm,
 		}, func(Config) PoolCalculator {
 			return poolCalculatorFunc(func(context.Context, PoolIdentifier) (*GetMetricsByPoolResponse, error) {
 				called = true
@@ -870,10 +857,8 @@ func TestCustomFactoryOverridesDefaultRoute(t *testing.T) {
 	_, err = client.GetMetricsByPool(context.Background(), GetMetricsByPoolRequest{
 		Pool: PoolIdentifier{
 			Dex:         DexPumpfun,
-			PoolVersion: PoolVersionPumpfunBondingCurve,
+			PoolVersion: PoolVersionPumpfunAmm,
 			PoolAddress: solana.SolMint,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 		},
 	})
 	if err != nil {
@@ -901,6 +886,8 @@ func TestAttachRequestDebug(t *testing.T) {
 func TestBuildMetricsResponse(t *testing.T) {
 	resp := buildMetricsResponse(
 		PoolIdentifier{Dex: DexPumpfun},
+		solana.MustPublicKeyFromBase58("So11111111111111111111111111111111111111112"),
+		solana.MustPublicKeyFromBase58("11111111111111111111111111111111"),
 		decimal.NewFromInt(1),
 		decimal.NewFromInt(2),
 		decimal.NewFromInt(3),
@@ -930,9 +917,7 @@ func TestDefaultCalculatorFactoryErrorMapping(t *testing.T) {
 	_, err := service.GetMetricsByPool(context.Background(), GetMetricsByPoolRequest{
 		Pool: PoolIdentifier{
 			Dex:         DexPumpfun,
-			PoolVersion: PoolVersionPumpfunBondingCurve,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
+			PoolVersion: PoolVersionPumpfunAmm,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -951,8 +936,6 @@ func TestGetMetricsByPool_NilRegisteredCalculator(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         Dex("nilcalc"),
 			PoolVersion: PoolVersion("v1"),
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -974,8 +957,6 @@ func TestDefaultAmmFactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexPumpfun,
 			PoolVersion: PoolVersionPumpfunAmm,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -997,8 +978,6 @@ func TestDefaultRaydiumV4FactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumLiquidityV4,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1020,8 +999,6 @@ func TestDefaultRaydiumCPMMFactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumCPMM,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1043,8 +1020,6 @@ func TestDefaultRaydiumCLMMFactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumCLMM,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1066,8 +1041,6 @@ func TestDefaultRaydiumLaunchpadFactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexRaydium,
 			PoolVersion: PoolVersionRaydiumLaunchpad,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1089,8 +1062,6 @@ func TestDefaultMeteoraDLMMFactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDLMM,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1112,8 +1083,6 @@ func TestDefaultMeteoraDBCFactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDBC,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1135,8 +1104,6 @@ func TestDefaultMeteoraDAMMV1FactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDAMMV1,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1158,8 +1125,6 @@ func TestDefaultMeteoraDAMMV2FactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexMeteora,
 			PoolVersion: PoolVersionMeteoraDAMMV2,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})
@@ -1181,8 +1146,6 @@ func TestDefaultOrcaWhirlpoolFactoryErrorMapping(t *testing.T) {
 		Pool: PoolIdentifier{
 			Dex:         DexOrca,
 			PoolVersion: PoolVersionOrcaWhirlpool,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	})

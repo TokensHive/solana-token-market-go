@@ -358,14 +358,6 @@ func TestComputeConfigAndCurveErrors(t *testing.T) {
 		t.Fatal("expected unsupported curve error")
 	}
 
-	calcMismatch := makeCalculator(&rpc.AccountInfo{Exists: true, Owner: launchpadProgramID, Data: buildConfigData(curveTypeConstantProduct, quoteMint)})
-	if _, err := calcMismatch.Compute(context.Background(), Request{
-		PoolAddress: pool,
-		MintA:       testPubkey(111),
-		MintB:       quoteMint,
-	}); err == nil {
-		t.Fatal("expected pool/request mint mismatch")
-	}
 }
 
 func TestComputeQuoteAndSupplyErrors(t *testing.T) {

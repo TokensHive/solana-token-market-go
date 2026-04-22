@@ -375,22 +375,18 @@ func TestRunWithPresetAndBuildRequest(t *testing.T) {
 		t.Fatal("expected invalid preset error")
 	}
 
-	_, err := buildRequest(poolPreset{
+	_, err := buildBondingCurveRequest(poolPreset{
 		Name:        "bad",
-		PoolVersion: market.PoolVersionPumpfunAmm,
 		MintA:       "bad",
 		MintB:       solana.SolMint.String(),
-		PoolAddress: solana.SolMint.String(),
 	})
 	if err == nil {
 		t.Fatal("expected invalid mintA error")
 	}
-	_, err = buildRequest(poolPreset{
+	_, err = buildBondingCurveRequest(poolPreset{
 		Name:        "bad",
-		PoolVersion: market.PoolVersionPumpfunAmm,
 		MintA:       solana.SolMint.String(),
 		MintB:       "bad",
-		PoolAddress: solana.SolMint.String(),
 	})
 	if err == nil {
 		t.Fatal("expected invalid mintB error")
@@ -413,8 +409,6 @@ func TestRunRequestDebugModes(t *testing.T) {
 		Pool: market.PoolIdentifier{
 			Dex:         market.DexPumpfun,
 			PoolVersion: market.PoolVersionPumpfunAmm,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 			PoolAddress: solana.SolMint,
 		},
 	}
@@ -587,11 +581,8 @@ func TestCirculatingSupplyPct(t *testing.T) {
 }
 
 func TestPooledSOLAndMint_BondingCurveMetadata(t *testing.T) {
-	pool := market.PoolIdentifier{
-		MintA: solana.SolMint,
-		MintB: mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg"),
-	}
-	pooledSOL, pooledMint := pooledSOLAndMint(pool, map[string]any{
+	token := mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg")
+	pooledSOL, pooledMint := pooledSOLAndMint(solana.SolMint, token, map[string]any{
 		"real_sol_reserve":   "1.25",
 		"real_token_reserve": "9900.5",
 	})
@@ -607,10 +598,7 @@ func TestPooledSOLAndMint_BaseQuoteAndCPMMMetadata(t *testing.T) {
 	tokenA := mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg")
 	tokenB := mustPubkey(t, "2bpT3ksMdwdZ6DuHyq3FDUr7HDwvZ5DRZoT1fUPALJaH")
 
-	pooledSOL, pooledMint := pooledSOLAndMint(market.PoolIdentifier{
-		MintA: tokenA,
-		MintB: solana.SolMint,
-	}, map[string]any{
+	pooledSOL, pooledMint := pooledSOLAndMint(tokenA, solana.SolMint, map[string]any{
 		"pool_base_mint":     wrappedSOLMint,
 		"pool_quote_mint":    tokenA.String(),
 		"pool_base_reserve":  "50",
@@ -623,10 +611,7 @@ func TestPooledSOLAndMint_BaseQuoteAndCPMMMetadata(t *testing.T) {
 		t.Fatalf("unexpected pooled mint: %s", pooledMint)
 	}
 
-	pooledSOL, pooledMint = pooledSOLAndMint(market.PoolIdentifier{
-		MintA: tokenA,
-		MintB: tokenB,
-	}, map[string]any{
+	pooledSOL, pooledMint = pooledSOLAndMint(tokenA, tokenB, map[string]any{
 		"pool_token0_mint":    tokenA.String(),
 		"pool_token1_mint":    tokenB.String(),
 		"pool_token0_reserve": "42",
@@ -639,10 +624,7 @@ func TestPooledSOLAndMint_BaseQuoteAndCPMMMetadata(t *testing.T) {
 		t.Fatalf("unexpected pooled mint for non-SOL pair: %s", pooledMint)
 	}
 
-	pooledSOL, pooledMint = pooledSOLAndMint(market.PoolIdentifier{
-		MintA: solana.SolMint,
-		MintB: tokenA,
-	}, map[string]any{
+	pooledSOL, pooledMint = pooledSOLAndMint(solana.SolMint, tokenA, map[string]any{
 		"pool_base_mint":     wrappedSOLMint,
 		"pool_quote_mint":    tokenA.String(),
 		"pool_base_reserve":  "70",
@@ -657,19 +639,16 @@ func TestPooledSOLAndMint_BaseQuoteAndCPMMMetadata(t *testing.T) {
 }
 
 func TestPooledSOLAndMint_InvalidMetadataPaths(t *testing.T) {
-	pool := market.PoolIdentifier{
-		MintA: solana.SolMint,
-		MintB: mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg"),
-	}
+	token := mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg")
 
-	pooledSOL, pooledMint := pooledSOLAndMint(pool, nil)
+	pooledSOL, pooledMint := pooledSOLAndMint(solana.SolMint, token, nil)
 	if !pooledSOL.IsZero() || !pooledMint.IsZero() {
 		t.Fatalf("expected zero values on empty metadata, got sol=%s mint=%s", pooledSOL, pooledMint)
 	}
 
-	pooledSOL, pooledMint = pooledSOLAndMint(pool, map[string]any{
+	pooledSOL, pooledMint = pooledSOLAndMint(solana.SolMint, token, map[string]any{
 		"pool_base_mint":     "invalid",
-		"pool_quote_mint":    pool.MintB.String(),
+		"pool_quote_mint":    token.String(),
 		"pool_base_reserve":  "1",
 		"pool_quote_reserve": "2",
 	})
@@ -679,11 +658,10 @@ func TestPooledSOLAndMint_InvalidMetadataPaths(t *testing.T) {
 }
 
 func TestPooledByMintMetadataErrorCases(t *testing.T) {
-	pool := market.PoolIdentifier{MintA: solana.SolMint, MintB: solana.SolMint}
-	if _, _, ok := pooledByMintMetadata(pool, map[string]any{}, "a", "b", "c", "d"); ok {
+	if _, _, ok := pooledByMintMetadata(solana.SolMint, solana.SolMint, map[string]any{}, "a", "b", "c", "d"); ok {
 		t.Fatal("expected false for missing keys")
 	}
-	if _, _, ok := pooledByMintMetadata(pool, map[string]any{
+	if _, _, ok := pooledByMintMetadata(solana.SolMint, solana.SolMint, map[string]any{
 		"a": 123,
 		"b": solana.SolMint.String(),
 		"c": "1",
@@ -691,7 +669,7 @@ func TestPooledByMintMetadataErrorCases(t *testing.T) {
 	}, "a", "b", "c", "d"); ok {
 		t.Fatal("expected false for non-string first mint type")
 	}
-	if _, _, ok := pooledByMintMetadata(pool, map[string]any{
+	if _, _, ok := pooledByMintMetadata(solana.SolMint, solana.SolMint, map[string]any{
 		"a": " ",
 		"b": solana.SolMint.String(),
 		"c": "1",
@@ -699,7 +677,7 @@ func TestPooledByMintMetadataErrorCases(t *testing.T) {
 	}, "a", "b", "c", "d"); ok {
 		t.Fatal("expected false for blank mint string")
 	}
-	if _, _, ok := pooledByMintMetadata(pool, map[string]any{
+	if _, _, ok := pooledByMintMetadata(solana.SolMint, solana.SolMint, map[string]any{
 		"a": solana.SolMint.String(),
 		"b": " ",
 		"c": "1",
@@ -707,7 +685,7 @@ func TestPooledByMintMetadataErrorCases(t *testing.T) {
 	}, "a", "b", "c", "d"); ok {
 		t.Fatal("expected false for blank second mint string")
 	}
-	if _, _, ok := pooledByMintMetadata(pool, map[string]any{
+	if _, _, ok := pooledByMintMetadata(solana.SolMint, solana.SolMint, map[string]any{
 		"a": solana.SolMint.String(),
 		"b": solana.SolMint.String(),
 		"c": "bad",
@@ -715,7 +693,7 @@ func TestPooledByMintMetadataErrorCases(t *testing.T) {
 	}, "a", "b", "c", "d"); ok {
 		t.Fatal("expected false for bad first reserve")
 	}
-	if _, _, ok := pooledByMintMetadata(pool, map[string]any{
+	if _, _, ok := pooledByMintMetadata(solana.SolMint, solana.SolMint, map[string]any{
 		"a": solana.SolMint.String(),
 		"b": solana.SolMint.String(),
 		"c": "1",
@@ -723,10 +701,10 @@ func TestPooledByMintMetadataErrorCases(t *testing.T) {
 	}, "a", "b", "c", "d"); ok {
 		t.Fatal("expected false for bad second reserve")
 	}
-	if _, _, ok := pooledByMintMetadata(market.PoolIdentifier{
-		MintA: mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg"),
-		MintB: solana.SolMint,
-	}, map[string]any{
+	if _, _, ok := pooledByMintMetadata(
+		mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg"),
+		solana.SolMint,
+		map[string]any{
 		"a": solana.SolMint.String(),
 		"b": mustPubkey(t, "2bpT3ksMdwdZ6DuHyq3FDUr7HDwvZ5DRZoT1fUPALJaH").String(),
 		"c": "1",
@@ -734,10 +712,10 @@ func TestPooledByMintMetadataErrorCases(t *testing.T) {
 	}, "a", "b", "c", "d"); ok {
 		t.Fatal("expected false when pool mintA does not match either side")
 	}
-	if _, _, ok := pooledByMintMetadata(market.PoolIdentifier{
-		MintA: solana.SolMint,
-		MintB: mustPubkey(t, "1zJX5gRnjLgmTpq5sVwkq69mNDQkCemqoasyjaPW6jm"),
-	}, map[string]any{
+	if _, _, ok := pooledByMintMetadata(
+		solana.SolMint,
+		mustPubkey(t, "1zJX5gRnjLgmTpq5sVwkq69mNDQkCemqoasyjaPW6jm"),
+		map[string]any{
 		"a": solana.SolMint.String(),
 		"b": mustPubkey(t, "2bpT3ksMdwdZ6DuHyq3FDUr7HDwvZ5DRZoT1fUPALJaH").String(),
 		"c": "1",
@@ -821,19 +799,19 @@ func TestRunRequestWithExtendedFieldsAndError(t *testing.T) {
 		Pool: market.PoolIdentifier{
 			Dex:         market.DexRaydium,
 			PoolVersion: market.PoolVersionRaydiumCPMM,
-			MintA:       mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg"),
-			MintB:       solana.SolMint,
 			PoolAddress: mustPubkey(t, "BScfGKZf9YDfpL11hZQnCQPskPrdeyFcvCjSA5qupEH5"),
 		},
 	}
 
 	err := runRequest(&fakeClient{
 		resp: &market.GetMetricsByPoolResponse{
+			MintA:             mustPubkey(t, "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg"),
+			MintB:             solana.SolMint,
 			TotalSupply:       decimal.NewFromInt(100),
 			CirculatingSupply: decimal.NewFromInt(50),
 			Metadata: map[string]any{
 				"pool_token0_mint":    wrappedSOLMint,
-				"pool_token1_mint":    req.Pool.MintA.String(),
+				"pool_token1_mint":    "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg",
 				"pool_token0_reserve": "25",
 				"pool_token1_reserve": "1000",
 				"fdv_method":          "mint_total_supply_default",

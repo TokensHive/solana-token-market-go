@@ -26,6 +26,11 @@ type metricsClient interface {
 	LastRequestDebug() map[string]any
 }
 
+type bondingCurveMetricsClient interface {
+	GetMetricsByPumpfunBondingCurve(ctx context.Context, req market.GetMetricsByPumpfunBondingCurveRequest) (*market.GetMetricsByPoolResponse, error)
+	LastRequestDebug() map[string]any
+}
+
 type poolPreset struct {
 	Name        string
 	Dex         market.Dex
@@ -50,80 +55,60 @@ var (
 		Name:        "Pumpfun PumpSwap AMM",
 		Dex:         market.DexPumpfun,
 		PoolVersion: market.PoolVersionPumpfunAmm,
-		MintA:       "9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "EQqvZi6mSaQL95wWkP5vGBX6ZsAkVTqZCV88rQU1fbcY",
 	}
 	raydiumV4Preset = poolPreset{
 		Name:        "Raydium Liquidity V4",
 		Dex:         market.DexRaydium,
 		PoolVersion: market.PoolVersionRaydiumLiquidityV4,
-		MintA:       "2nCeHpECQvnMfzjU5fDMAKws1vBxMzxvWr6qqLpApump",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "81BTnebmHFZdVMhFKHhQKAnEwgGPTNbMj1fezsbUjtkG",
 	}
 	raydiumCPMMPreset = poolPreset{
 		Name:        "Raydium CPMM (SURGE/SOL)",
 		Dex:         market.DexRaydium,
 		PoolVersion: market.PoolVersionRaydiumCPMM,
-		MintA:       "3z2tRjNuQjoq6UDcw4zyEPD1Eb5KXMPYb4GWFzVT1DPg",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "BScfGKZf9YDfpL11hZQnCQPskPrdeyFcvCjSA5qupEH5",
 	}
 	raydiumCLMMPreset = poolPreset{
 		Name:        "Raydium CLMM (USDC/SOL)",
 		Dex:         market.DexRaydium,
 		PoolVersion: market.PoolVersionRaydiumCLMM,
-		MintA:       "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "2QdhepnKRTLjjSqPL1PtKNwqrUkoLee5Gqs8bvZhRdMv",
 	}
 	raydiumLaunchpadPreset = poolPreset{
 		Name:        "Raydium Launchpad (VIBINGCAT/SOL)",
 		Dex:         market.DexRaydium,
 		PoolVersion: market.PoolVersionRaydiumLaunchpad,
-		MintA:       "nXU1zKEAyqPJmsjfdSuc4bcFUt8huu6GFUVgziebonk",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "257urGqFaYq3BjCVrA6GS7MdfyZR4mb11RWEeuG73LYG",
 	}
 	meteoraDLMMPreset = poolPreset{
 		Name:        "Meteora DLMM (SPIKE/SOL)",
 		Dex:         market.DexMeteora,
 		PoolVersion: market.PoolVersionMeteoraDLMM,
-		MintA:       "BFiGUxnidogqcZAPVPDZRCfhx3nXnFLYqpQUaUGpump",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "6KvXWfjwZ7mfiFALRDmj4YvJw3LxfSnLadj1kZfBykYp",
 	}
 	meteoraDBCPreset = poolPreset{
 		Name:        "Meteora DBC (FLYWHEEL/SOL)",
 		Dex:         market.DexMeteora,
 		PoolVersion: market.PoolVersionMeteoraDBC,
-		MintA:       "8pmn9W36uuJDACuw4wVTtrnw4rGDhmiP9Kgsne5Hbrrr",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "Fc2rywpnDPrb4ik2V31tKTdo4EEWTZaHQJCWcLjAUvFD",
 	}
 	meteoraDAMMV1Preset = poolPreset{
 		Name:        "Meteora DAMM V1 (NOBODY/SOL)",
 		Dex:         market.DexMeteora,
 		PoolVersion: market.PoolVersionMeteoraDAMMV1,
-		MintA:       "C29ebrgYjYoJPMGPnPSGY1q3mMGk4iDSqnQeQQA7moon",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "7rQd8FhC1rimV3v9edCRZ6RNFsJN1puXM9UmjaURJRNj",
 	}
 	meteoraDAMMV2Preset = poolPreset{
 		Name:        "Meteora DAMM V2 (PEPE/SOL)",
 		Dex:         market.DexMeteora,
 		PoolVersion: market.PoolVersionMeteoraDAMMV2,
-		MintA:       "EkJuyYyD3to61CHVPJn6wHb7xANxvqApnVJ4o2SdBAGS",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "8Lvqv2jgNvcx1NDtMHd5Ahx8ZUjETfLwygq9MtDfPHxe",
 	}
 	orcaWhirlpoolPreset = poolPreset{
 		Name:        "Orca Whirlpool (MOLT/SOL)",
 		Dex:         market.DexOrca,
 		PoolVersion: market.PoolVersionOrcaWhirlpool,
-		MintA:       "5552z6Qp2xr596ox1UVN4ppDwwyjCfY8cXwzHMXgMcaS",
-		MintB:       solana.SolMint.String(),
 		PoolAddress: "EAzwsTfbdPmjW5eEWtxNpXaHLzVJmpTUGzkTPnCPrTHd",
 	}
 	defaultPresets = []poolPreset{
@@ -235,11 +220,26 @@ func newClient(rpcURL string, debug bool) (metricsClient, error) {
 }
 
 func runWithPreset(client metricsClient, timeout time.Duration, preset poolPreset, printDebug bool, out io.Writer) error {
+	fmt.Fprintf(out, "\n--- %s ---\n", preset.Name)
+	if preset.Dex == market.DexPumpfun && preset.PoolVersion == market.PoolVersionPumpfunBondingCurve {
+		if bcClient, ok := client.(bondingCurveMetricsClient); ok {
+			req, err := buildBondingCurveRequest(preset)
+			if err != nil {
+				return fmt.Errorf("preset %q invalid: %w", preset.Name, err)
+			}
+			return runBondingCurveRequest(bcClient, timeout, req, printDebug, out)
+		}
+		// Fallback for lightweight test doubles that only implement GetMetricsByPool.
+		legacyReq, err := buildRequest(preset)
+		if err != nil {
+			return fmt.Errorf("preset %q invalid: %w", preset.Name, err)
+		}
+		return runRequest(client, timeout, legacyReq, printDebug, out)
+	}
 	req, err := buildRequest(preset)
 	if err != nil {
 		return fmt.Errorf("preset %q invalid: %w", preset.Name, err)
 	}
-	fmt.Fprintf(out, "\n--- %s ---\n", preset.Name)
 	return runRequest(client, timeout, req, printDebug, out)
 }
 
@@ -247,14 +247,6 @@ func buildRequest(preset poolPreset) (market.GetMetricsByPoolRequest, error) {
 	dex := preset.Dex
 	if dex == "" {
 		dex = market.DexPumpfun
-	}
-	mintAPK, err := solana.PublicKeyFromBase58(strings.TrimSpace(preset.MintA))
-	if err != nil {
-		return market.GetMetricsByPoolRequest{}, fmt.Errorf("invalid mintA: %w", err)
-	}
-	mintBPK, err := solana.PublicKeyFromBase58(strings.TrimSpace(preset.MintB))
-	if err != nil {
-		return market.GetMetricsByPoolRequest{}, fmt.Errorf("invalid mintB: %w", err)
 	}
 	poolPK, err := solana.PublicKeyFromBase58(strings.TrimSpace(preset.PoolAddress))
 	if err != nil {
@@ -264,10 +256,23 @@ func buildRequest(preset poolPreset) (market.GetMetricsByPoolRequest, error) {
 		Pool: market.PoolIdentifier{
 			Dex:         dex,
 			PoolVersion: preset.PoolVersion,
-			MintA:       mintAPK,
-			MintB:       mintBPK,
 			PoolAddress: poolPK,
 		},
+	}, nil
+}
+
+func buildBondingCurveRequest(preset poolPreset) (market.GetMetricsByPumpfunBondingCurveRequest, error) {
+	mintAPK, err := solana.PublicKeyFromBase58(strings.TrimSpace(preset.MintA))
+	if err != nil {
+		return market.GetMetricsByPumpfunBondingCurveRequest{}, fmt.Errorf("invalid mintA: %w", err)
+	}
+	mintBPK, err := solana.PublicKeyFromBase58(strings.TrimSpace(preset.MintB))
+	if err != nil {
+		return market.GetMetricsByPumpfunBondingCurveRequest{}, fmt.Errorf("invalid mintB: %w", err)
+	}
+	return market.GetMetricsByPumpfunBondingCurveRequest{
+		MintA: mintAPK,
+		MintB: mintBPK,
 	}, nil
 }
 
@@ -276,12 +281,12 @@ func runRequest(client metricsClient, timeout time.Duration, req market.GetMetri
 	defer cancel()
 
 	fmt.Fprintf(out, "dex=%s version=%s pool=%s\n", req.Pool.Dex, req.Pool.PoolVersion, req.Pool.PoolAddress.String())
-	fmt.Fprintf(out, "pair=%s / %s\n", req.Pool.MintA.String(), req.Pool.MintB.String())
 
 	resp, err := client.GetMetricsByPool(ctx, req)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(out, "pair=%s / %s\n", resp.MintA.String(), resp.MintB.String())
 
 	fmt.Fprintf(out, "price_a_in_b=%s\n", resp.PriceOfAInB)
 	fmt.Fprintf(out, "price_a_in_sol=%s\n", resp.PriceOfAInSOL)
@@ -292,7 +297,57 @@ func runRequest(client metricsClient, timeout time.Duration, req market.GetMetri
 	fmt.Fprintf(out, "circ_supply_pct=%s\n", circulatingSupplyPct(resp.TotalSupply, resp.CirculatingSupply))
 	fmt.Fprintf(out, "market_cap_in_sol=%s\n", resp.MarketCapInSOL)
 	fmt.Fprintf(out, "fdv_in_sol=%s\n", resp.FDVInSOL)
-	pooledSOL, pooledMint := pooledSOLAndMint(req.Pool, resp.Metadata)
+	pooledSOL, pooledMint := pooledSOLAndMint(resp.MintA, resp.MintB, resp.Metadata)
+	fmt.Fprintf(out, "pooled_sol=%s\n", pooledSOL)
+	fmt.Fprintf(out, "pooled_mint=%s\n", pooledMint)
+	if fdvMethod, ok := resp.Metadata["fdv_method"]; ok {
+		fmt.Fprintf(out, "fdv_method=%v\n", fdvMethod)
+	}
+	if fdvSupply, ok := resp.Metadata["fdv_supply"]; ok {
+		fmt.Fprintf(out, "fdv_supply=%v\n", fdvSupply)
+	}
+	fmt.Fprintf(out, "supply_method=%s\n", resp.SupplyMethod)
+
+	if !printDebug {
+		return nil
+	}
+	debug := client.LastRequestDebug()
+	if len(debug) == 0 {
+		fmt.Fprintln(out, "debug: <empty>")
+		return nil
+	}
+	encoded, err := json.MarshalIndent(debug, "", "  ")
+	if err != nil {
+		return fmt.Errorf("debug marshal error: %w", err)
+	}
+	fmt.Fprintln(out, "debug:")
+	fmt.Fprintln(out, string(encoded))
+	return nil
+}
+
+func runBondingCurveRequest(client bondingCurveMetricsClient, timeout time.Duration, req market.GetMetricsByPumpfunBondingCurveRequest, printDebug bool, out io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	fmt.Fprintf(out, "dex=%s version=%s\n", market.DexPumpfun, market.PoolVersionPumpfunBondingCurve)
+	fmt.Fprintf(out, "pair=%s / %s\n", req.MintA.String(), req.MintB.String())
+
+	resp, err := client.GetMetricsByPumpfunBondingCurve(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "pool=%s\n", resp.Pool.PoolAddress.String())
+	fmt.Fprintf(out, "price_a_in_b=%s\n", resp.PriceOfAInB)
+	fmt.Fprintf(out, "price_a_in_sol=%s\n", resp.PriceOfAInSOL)
+	fmt.Fprintf(out, "liquidity_in_b=%s\n", resp.LiquidityInB)
+	fmt.Fprintf(out, "liquidity_in_sol=%s\n", resp.LiquidityInSOL)
+	fmt.Fprintf(out, "total_supply=%s\n", resp.TotalSupply)
+	fmt.Fprintf(out, "circulating_supply=%s\n", resp.CirculatingSupply)
+	fmt.Fprintf(out, "circ_supply_pct=%s\n", circulatingSupplyPct(resp.TotalSupply, resp.CirculatingSupply))
+	fmt.Fprintf(out, "market_cap_in_sol=%s\n", resp.MarketCapInSOL)
+	fmt.Fprintf(out, "fdv_in_sol=%s\n", resp.FDVInSOL)
+	pooledSOL, pooledMint := pooledSOLAndMint(resp.MintA, resp.MintB, resp.Metadata)
 	fmt.Fprintf(out, "pooled_sol=%s\n", pooledSOL)
 	fmt.Fprintf(out, "pooled_mint=%s\n", pooledMint)
 	if fdvMethod, ok := resp.Metadata["fdv_method"]; ok {
@@ -418,7 +473,7 @@ func circulatingSupplyPct(totalSupply decimal.Decimal, circulatingSupply decimal
 	return circulatingSupply.Div(totalSupply).Mul(decimal.NewFromInt(100))
 }
 
-func pooledSOLAndMint(pool market.PoolIdentifier, metadata map[string]any) (decimal.Decimal, decimal.Decimal) {
+func pooledSOLAndMint(mintA solana.PublicKey, mintB solana.PublicKey, metadata map[string]any) (decimal.Decimal, decimal.Decimal) {
 	if len(metadata) == 0 {
 		return decimal.Zero, decimal.Zero
 	}
@@ -430,7 +485,8 @@ func pooledSOLAndMint(pool market.PoolIdentifier, metadata map[string]any) (deci
 	}
 
 	if pooledSOL, pooledMint, ok := pooledByMintMetadata(
-		pool,
+		mintA,
+		mintB,
 		metadata,
 		"pool_base_mint",
 		"pool_quote_mint",
@@ -441,7 +497,8 @@ func pooledSOLAndMint(pool market.PoolIdentifier, metadata map[string]any) (deci
 	}
 
 	if pooledSOL, pooledMint, ok := pooledByMintMetadata(
-		pool,
+		mintA,
+		mintB,
 		metadata,
 		"pool_token0_mint",
 		"pool_token1_mint",
@@ -454,7 +511,8 @@ func pooledSOLAndMint(pool market.PoolIdentifier, metadata map[string]any) (deci
 }
 
 func pooledByMintMetadata(
-	pool market.PoolIdentifier,
+	mintA solana.PublicKey,
+	mintB solana.PublicKey,
 	metadata map[string]any,
 	mintAKey string,
 	mintBKey string,
@@ -478,21 +536,21 @@ func pooledByMintMetadata(
 		return decimal.Zero, decimal.Zero, false
 	}
 
-	mintAReserve, ok := reserveForMint(pool.MintA, mintAStr, reserveA, mintBStr, reserveB)
+	mintAReserve, ok := reserveForMint(mintA, mintAStr, reserveA, mintBStr, reserveB)
 	if !ok {
 		return decimal.Zero, decimal.Zero, false
 	}
-	mintBReserve, ok := reserveForMint(pool.MintB, mintAStr, reserveA, mintBStr, reserveB)
+	mintBReserve, ok := reserveForMint(mintB, mintAStr, reserveA, mintBStr, reserveB)
 	if !ok {
 		return decimal.Zero, decimal.Zero, false
 	}
 
 	pooledMint := mintAReserve
 	pooledSOL := decimal.Zero
-	if isSOLMint(pool.MintA) {
+	if isSOLMint(mintA) {
 		pooledSOL = mintAReserve
 		pooledMint = mintBReserve
-	} else if isSOLMint(pool.MintB) {
+	} else if isSOLMint(mintB) {
 		pooledSOL = mintBReserve
 	}
 	return pooledSOL, pooledMint, true

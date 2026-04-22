@@ -32,3 +32,6 @@ go.work.sum
 # .vscode/
 
 scripts/
+
+# Marketing drafts (Medium articles, launch copy, private go-to-market assets)
+marketing/

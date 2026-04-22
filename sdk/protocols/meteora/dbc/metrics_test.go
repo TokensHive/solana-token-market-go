@@ -263,7 +263,7 @@ func TestCompute_ValidationAndPoolErrors(t *testing.T) {
 		t.Fatal("expected pool address required error")
 	}
 	if _, err := NewCalculator(&mockRPC{}, nil, &mockSupply{}).Compute(context.Background(), Request{PoolAddress: solana.SolMint}); err == nil {
-		t.Fatal("expected mint required error")
+		t.Fatal("expected pool not found")
 	}
 
 	calc := NewCalculator(&mockRPC{getAccountErr: errors.New("rpc failed")}, nil, &mockSupply{})
@@ -326,16 +326,7 @@ func TestCompute_BatchDecodeAndDownstreamErrors(t *testing.T) {
 		quoteMint.String():  {Address: quoteMint, Exists: true, Data: makeMintData(9)},
 	}
 
-	calc := NewCalculator(&mockRPC{accounts: baseAccounts}, nil, &mockSupply{})
-	if _, err := calc.Compute(context.Background(), Request{
-		PoolAddress: pool,
-		MintA:       testPubkey(99),
-		MintB:       quoteMint,
-	}); err == nil {
-		t.Fatal("expected pool mismatch error")
-	}
-
-	calc = NewCalculator(&mockRPC{
+	calc := NewCalculator(&mockRPC{
 		accounts:       baseAccounts,
 		getMultipleErr: errors.New("batch failed"),
 	}, nil, &mockSupply{})

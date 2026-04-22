@@ -50,8 +50,6 @@ func TestDebugLifecycle(t *testing.T) {
 			Dex:         Dex("custom"),
 			PoolVersion: PoolVersion("v1"),
 			PoolAddress: solana.SolMint,
-			MintA:       solana.SolMint,
-			MintB:       solana.SolMint,
 		},
 	})
 	if err != nil {

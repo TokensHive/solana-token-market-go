@@ -38,6 +38,7 @@ go get github.com/TokensHive/solana-token-market-go
 
 - `market.NewClient(...)`
 - `client.GetMetricsByPool(ctx, request)`
+- `client.GetMetricsByPumpfunBondingCurve(ctx, request)` for Pump.fun `bonding_curve`
 - `client.LastRequestDebug()`
 - `market.WithPoolCalculatorFactory(route, factory)` for custom DEX integrations
 
@@ -51,9 +52,10 @@ go get github.com/TokensHive/solana-token-market-go
 | --- | --- | --- |
 | `Pool.Dex` | `market.Dex` | Top-level DEX family (`pumpfun`, `raydium`, `meteora`, `orca`, or your custom value). |
 | `Pool.PoolVersion` | `market.PoolVersion` | Protocol/pool implementation identifier inside the DEX. |
-| `Pool.MintA` | `solana.PublicKey` | Base token mint to price and value. |
-| `Pool.MintB` | `solana.PublicKey` | Quote token mint. Usually `SOL`/`WSOL` for direct SOL quoting. |
 | `Pool.PoolAddress` | `solana.PublicKey` | Pool account address for the exact route. |
+
+`GetMetricsByPool` resolves output mints from pool state in canonical on-chain order (`A=pool token0/base`, `B=pool token1/quote`).
+For Pump.fun `bonding_curve`, use `GetMetricsByPumpfunBondingCurve` (mint-based request) because the curve account layout does not include token mint fields.
 
 ### Response
 
@@ -61,6 +63,8 @@ go get github.com/TokensHive/solana-token-market-go
 
 | Property | Meaning |
 | --- | --- |
+| `MintA` | Canonical base mint resolved from pool state (or from bonding-curve method request). |
+| `MintB` | Canonical quote mint resolved from pool state (or from bonding-curve method request). |
 | `PriceOfAInB` | Spot price of `MintA` denominated in `MintB`. |
 | `PriceOfAInSOL` | Spot price of `MintA` normalized to SOL. |
 | `LiquidityInB` | Total two-sided pool liquidity expressed in `MintB` units. |
@@ -78,7 +82,7 @@ go get github.com/TokensHive/solana-token-market-go
 
 | Pool Version | Program ID (Mainnet) | IDL/Layout | Operations |
 | --- | --- | --- | --- |
-| `bonding_curve` | `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P` | [`pump.json`](https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump.json) | `GetMetricsByPool` |
+| `bonding_curve` | `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P` | [`pump.json`](https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump.json) | `GetMetricsByPumpfunBondingCurve` |
 | `pumpswap_amm` | `pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA` | [`pump_amm.json`](https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump_amm.json) | `GetMetricsByPool` |
 
 ### Raydium
@@ -119,17 +123,29 @@ if err != nil {
 resp, err := client.GetMetricsByPool(ctx, market.GetMetricsByPoolRequest{
 	Pool: market.PoolIdentifier{
 		Dex:         market.DexPumpfun,
-		PoolVersion: market.PoolVersionPumpfunBondingCurve,
-		MintA:       solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
-		MintB:       solana.SolMint,
-		PoolAddress: solana.MustPublicKeyFromBase58("2ebnjcJ5f8V6NhvWQfagfo6f6Mpn8jL42x8UxKM4Gz8H"),
+		PoolVersion: market.PoolVersionPumpfunAmm,
+		PoolAddress: solana.MustPublicKeyFromBase58("EQqvZi6mSaQL95wWkP5vGBX6ZsAkVTqZCV88rQU1fbcY"),
 	},
 })
 if err != nil {
 	panic(err)
 }
 
-fmt.Println(resp.PriceOfAInSOL, resp.LiquidityInSOL, resp.MarketCapInSOL, resp.FDVInSOL)
+fmt.Println(resp.MintA, resp.MintB, resp.PriceOfAInSOL, resp.LiquidityInSOL, resp.MarketCapInSOL, resp.FDVInSOL)
+```
+
+Pump.fun bonding curve quick start:
+
+```go
+resp, err := client.GetMetricsByPumpfunBondingCurve(ctx, market.GetMetricsByPumpfunBondingCurveRequest{
+	MintA: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+	MintB: solana.SolMint,
+})
+if err != nil {
+	panic(err)
+}
+
+fmt.Println(resp.Pool.PoolAddress, resp.PriceOfAInSOL, resp.MarketCapInSOL)
 ```
 
 ## Example CLI
@@ -189,7 +205,7 @@ func (s *Server) HandleMetrics(w http.ResponseWriter, r *http.Request) {
     ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
     defer cancel()
 
-    req := decodeRequest(r) // parse dex/poolVersion/mints/poolAddress
+    req := decodeRequest(r) // parse dex/poolVersion/poolAddress
     resp, err := s.client.GetMetricsByPool(ctx, req)
     if err != nil {
         http.Error(w, err.Error(), http.StatusBadRequest)

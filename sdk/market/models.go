@@ -35,8 +35,6 @@ const (
 type PoolIdentifier struct {
 	Dex         Dex
 	PoolVersion PoolVersion
-	MintA       solana.PublicKey
-	MintB       solana.PublicKey
 	PoolAddress solana.PublicKey
 }
 
@@ -44,8 +42,15 @@ type GetMetricsByPoolRequest struct {
 	Pool PoolIdentifier
 }
 
+type GetMetricsByPumpfunBondingCurveRequest struct {
+	MintA solana.PublicKey
+	MintB solana.PublicKey
+}
+
 type GetMetricsByPoolResponse struct {
 	Pool              PoolIdentifier
+	MintA             solana.PublicKey
+	MintB             solana.PublicKey
 	PriceOfAInB       Decimal
 	PriceOfAInSOL     Decimal
 	LiquidityInB      Decimal
