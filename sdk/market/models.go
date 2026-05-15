@@ -42,9 +42,25 @@ type GetMetricsByPoolRequest struct {
 	Pool PoolIdentifier
 }
 
+type GetMetricsByPoolsRequest struct {
+	Pools          []PoolIdentifier
+	MaxConcurrency int
+	ChunkSize      int
+}
+
 type GetMetricsByPumpfunBondingCurveRequest struct {
 	MintA solana.PublicKey
 	MintB solana.PublicKey
+}
+
+type GetMetricsByPoolItemResult struct {
+	Pool    PoolIdentifier
+	Metrics *GetMetricsByPoolResponse
+	Error   *SDKError
+}
+
+type GetMetricsByPoolsResponse struct {
+	Results []GetMetricsByPoolItemResult
 }
 
 type GetMetricsByPoolResponse struct {

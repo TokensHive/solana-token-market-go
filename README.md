@@ -38,6 +38,7 @@ go get github.com/TokensHive/solana-token-market-go
 
 - `market.NewClient(...)`
 - `client.GetMetricsByPool(ctx, request)`
+- `client.GetMetricsByPools(ctx, request)` for bulk pool metrics (partial success per item)
 - `client.GetMetricsByPumpfunBondingCurve(ctx, request)` for Pump.fun `bonding_curve`
 - `client.LastRequestDebug()`
 - `market.WithPoolCalculatorFactory(route, factory)` for custom DEX integrations
@@ -56,6 +57,26 @@ go get github.com/TokensHive/solana-token-market-go
 
 `GetMetricsByPool` resolves output mints from pool state in canonical on-chain order (`A=pool token0/base`, `B=pool token1/quote`).
 For Pump.fun `bonding_curve`, use `GetMetricsByPumpfunBondingCurve` (mint-based request) because the curve account layout does not include token mint fields.
+
+## GetMetricsByPools (Bulk) Contract
+
+`market.GetMetricsByPoolsRequest` accepts:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `Pools` | `[]market.PoolIdentifier` | List of pool routes to evaluate in one request. |
+| `MaxConcurrency` | `int` | Optional per-call worker cap. Uses client default when omitted or `<= 0`. |
+| `ChunkSize` | `int` | Optional per-call `GetMultipleAccounts` chunk override. Uses client default when omitted or `<= 0`. |
+
+`market.GetMetricsByPoolsResponse` returns ordered per-item results:
+
+| Property | Meaning |
+| --- | --- |
+| `Results[i].Pool` | Input pool descriptor for item `i` (same ordering as request). |
+| `Results[i].Metrics` | Populated on success. Same schema as `GetMetricsByPoolResponse`. |
+| `Results[i].Error` | Populated on failure for that item. Partial success is supported. |
+
+Bulk requests apply bounded concurrency and account-batch chunking automatically to reduce RPC pressure on large pool lists.
 
 ### Response
 
@@ -148,6 +169,37 @@ if err != nil {
 fmt.Println(resp.Pool.PoolAddress, resp.PriceOfAInSOL, resp.MarketCapInSOL)
 ```
 
+Bulk quick start:
+
+```go
+bulkResp, err := client.GetMetricsByPools(ctx, market.GetMetricsByPoolsRequest{
+	Pools: []market.PoolIdentifier{
+		{
+			Dex:         market.DexPumpfun,
+			PoolVersion: market.PoolVersionPumpfunAmm,
+			PoolAddress: solana.MustPublicKeyFromBase58("EQqvZi6mSaQL95wWkP5vGBX6ZsAkVTqZCV88rQU1fbcY"),
+		},
+		{
+			Dex:         market.DexRaydium,
+			PoolVersion: market.PoolVersionRaydiumCPMM,
+			PoolAddress: solana.MustPublicKeyFromBase58("BScfGKZf9YDfpL11hZQnCQPskPrdeyFcvCjSA5qupEH5"),
+		},
+	},
+	MaxConcurrency: 8,
+	ChunkSize:      100,
+})
+if err != nil {
+	panic(err)
+}
+for _, item := range bulkResp.Results {
+	if item.Error != nil {
+		fmt.Println("pool failed:", item.Pool.PoolAddress, item.Error)
+		continue
+	}
+	fmt.Println("pool ok:", item.Pool.PoolAddress, item.Metrics.PriceOfAInSOL)
+}
+```
+
 ## Example CLI
 
 Interactive mode:
@@ -167,6 +219,11 @@ Useful flags:
 - `-rpc`: custom RPC endpoint
 - `-timeout`: request timeout (for example `60s`)
 - `-debug`: include/exclude `LastRequestDebug()` output
+
+Bulk tuning options:
+
+- `market.WithMaxBulkConcurrency(n)` to cap pool workers for `GetMetricsByPools`
+- `market.WithBulkChunkSize(n)` to cap `GetMultipleAccounts` chunk size for large account sets
 
 ## Milestone: Resilience, Performance, and Integrations
 

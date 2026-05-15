@@ -27,6 +27,7 @@ func NewClient(opts ...Option) (*Client, error) {
 	if cfg.RPCClient == nil {
 		cfg.RPCClient = rpc.NewNoopClient()
 	}
+	cfg.RPCClient = rpc.NewChunkingClient(cfg.RPCClient, cfg.BulkChunkSize)
 	if cfg.QuoteBridge == nil {
 		cfg.QuoteBridge = quote.NewNoopBridge()
 	}

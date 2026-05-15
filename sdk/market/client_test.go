@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
@@ -116,5 +117,97 @@ func TestGetMetricsByPumpfunBondingCurveClientDebugLifecycle(t *testing.T) {
 	}
 	if debug := client.LastRequestDebug(); debug == nil || debug["operation"] == nil {
 		t.Fatalf("expected request debug snapshot, got %#v", debug)
+	}
+}
+
+func TestGetMetricsByPoolsClientDebugLifecycle(t *testing.T) {
+	route := PoolRoute{Dex: Dex("custom_bulk"), PoolVersion: PoolVersion("v1")}
+	client, err := NewClient(
+		WithDebugRequests(true),
+		WithPoolCalculatorFactory(route, func(Config) PoolCalculator {
+			return poolCalculatorFunc(func(_ context.Context, pool PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+				return &GetMetricsByPoolResponse{
+					Pool:          pool,
+					PriceOfAInSOL: decimal.NewFromInt(1),
+				}, nil
+			})
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new client failed: %v", err)
+	}
+
+	resp, err := client.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools: []PoolIdentifier{
+			{
+				Dex:         route.Dex,
+				PoolVersion: route.PoolVersion,
+				PoolAddress: solana.SolMint,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected successful bulk client call, got %v", err)
+	}
+	if resp == nil || len(resp.Results) != 1 || resp.Results[0].Metrics == nil {
+		t.Fatalf("expected non-empty bulk response, got %#v", resp)
+	}
+	if debug := client.LastRequestDebug(); debug == nil || debug["operation"] == nil || debug["operation"] != "GetMetricsByPools" {
+		t.Fatalf("expected bulk request debug snapshot, got %#v", debug)
+	}
+}
+
+func TestNewClientWrapsRPCWithChunkingClient(t *testing.T) {
+	var calls int
+	mockRPC := &marketMockRPC{
+		getMultipleAccountsFn: func(_ context.Context, keys []solana.PublicKey) ([]*rpc.AccountInfo, error) {
+			calls++
+			out := make([]*rpc.AccountInfo, len(keys))
+			for i := range keys {
+				out[i] = &rpc.AccountInfo{
+					Address: keys[i],
+					Exists:  true,
+				}
+			}
+			return out, nil
+		},
+	}
+	route := PoolRoute{Dex: Dex("chunked"), PoolVersion: PoolVersion("v1")}
+	client, err := NewClient(
+		WithRPCClient(mockRPC),
+		WithBulkChunkSize(2),
+		WithPoolCalculatorFactory(route, func(cfg Config) PoolCalculator {
+			return poolCalculatorFunc(func(ctx context.Context, pool PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+				keys := []solana.PublicKey{pool.PoolAddress, marketTestPubkey(2), marketTestPubkey(3)}
+				infos, err := cfg.RPCClient.GetMultipleAccounts(ctx, keys)
+				if err != nil {
+					return nil, NewError(ErrCodeInternal, "chunked call failed", err)
+				}
+				if len(infos) != len(keys) {
+					return nil, errors.New("unexpected account count")
+				}
+				return &GetMetricsByPoolResponse{
+					Pool:          pool,
+					PriceOfAInSOL: decimal.NewFromInt(1),
+				}, nil
+			})
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new client failed: %v", err)
+	}
+
+	_, err = client.GetMetricsByPool(context.Background(), GetMetricsByPoolRequest{
+		Pool: PoolIdentifier{
+			Dex:         route.Dex,
+			PoolVersion: route.PoolVersion,
+			PoolAddress: marketTestPubkey(1),
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected successful call through chunking wrapper, got %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected wrapped RPC to split getMultipleAccounts into 2 calls, got %d", calls)
 	}
 }

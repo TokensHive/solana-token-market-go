@@ -158,6 +158,7 @@ func run(args []string, in io.Reader, out io.Writer, errOut io.Writer, buildClie
 
 	fmt.Fprintf(out, "RPC: %s\n", *rpcURL)
 	fmt.Fprintf(out, "Interactive: %v | Debug: %v\n", *interactive, *printDebug)
+	fmt.Fprintln(out, "Tip: use client.GetMetricsByPools(...) for bulk pool metrics.")
 
 	if !*interactive {
 		for _, preset := range defaultPresets {

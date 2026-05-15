@@ -2,7 +2,9 @@ package market
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	meteordammv1 "github.com/TokensHive/solana-token-market-go/sdk/protocols/meteora/damm_v1"
 	meteordammv2 "github.com/TokensHive/solana-token-market-go/sdk/protocols/meteora/damm_v2"
@@ -15,6 +17,7 @@ import (
 	raydiumcpmm "github.com/TokensHive/solana-token-market-go/sdk/protocols/raydium/cpmm"
 	raydiumlaunchpad "github.com/TokensHive/solana-token-market-go/sdk/protocols/raydium/launchpad"
 	raydiumv4 "github.com/TokensHive/solana-token-market-go/sdk/protocols/raydium/liquidity_v4"
+	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
 	"github.com/gagliardetto/solana-go"
 )
 
@@ -33,6 +36,12 @@ func (c *Client) GetMetricsByPumpfunBondingCurve(ctx context.Context, req GetMet
 	ctx, recorder := c.startDebug(ctx, "GetMetricsByPumpfunBondingCurve")
 	defer c.finishDebug(recorder)
 	return c.service.GetMetricsByPumpfunBondingCurve(ctx, req)
+}
+
+func (c *Client) GetMetricsByPools(ctx context.Context, req GetMetricsByPoolsRequest) (*GetMetricsByPoolsResponse, error) {
+	ctx, recorder := c.startDebug(ctx, "GetMetricsByPools")
+	defer c.finishDebug(recorder)
+	return c.service.GetMetricsByPools(ctx, req)
 }
 
 func (s *Service) GetMetricsByPool(ctx context.Context, req GetMetricsByPoolRequest) (*GetMetricsByPoolResponse, error) {
@@ -113,6 +122,60 @@ func (s *Service) GetMetricsByPumpfunBondingCurve(ctx context.Context, req GetMe
 	return resp, nil
 }
 
+func (s *Service) GetMetricsByPools(ctx context.Context, req GetMetricsByPoolsRequest) (*GetMetricsByPoolsResponse, error) {
+	if len(req.Pools) == 0 {
+		return &GetMetricsByPoolsResponse{Results: []GetMetricsByPoolItemResult{}}, nil
+	}
+
+	maxConcurrency := req.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = s.cfg.MaxBulkConcurrency
+	}
+	if maxConcurrency <= 0 {
+		maxConcurrency = 1
+	}
+	if maxConcurrency > len(req.Pools) {
+		maxConcurrency = len(req.Pools)
+	}
+
+	itemCtx := ctx
+	chunkSize := req.ChunkSize
+	if chunkSize <= 0 {
+		chunkSize = s.cfg.BulkChunkSize
+	}
+	if chunkSize > 0 {
+		itemCtx = rpc.WithGetMultipleAccountsChunkSize(itemCtx, chunkSize)
+	}
+
+	results := make([]GetMetricsByPoolItemResult, len(req.Pools))
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+
+	for i := range req.Pools {
+		i := i
+		pool := req.Pools[i]
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			item := GetMetricsByPoolItemResult{Pool: pool}
+			metrics, err := s.GetMetricsByPool(itemCtx, GetMetricsByPoolRequest{Pool: pool})
+			if err != nil {
+				item.Error = toSDKError(err)
+			} else {
+				item.Metrics = metrics
+			}
+			results[i] = item
+		}()
+	}
+
+	wg.Wait()
+	return &GetMetricsByPoolsResponse{Results: results}, nil
+}
+
 func validateMetricsRequest(req GetMetricsByPoolRequest) error {
 	if req.Pool.Dex == "" {
 		return NewError(ErrCodeInvalidArgument, "pool dex is required", nil)
@@ -134,6 +197,21 @@ func validatePumpfunBondingCurveRequest(req GetMetricsByPumpfunBondingCurveReque
 		return NewError(ErrCodeInvalidArgument, "pumpfun bonding curve requires one side to be SOL", nil)
 	}
 	return nil
+}
+
+func toSDKError(err error) *SDKError {
+	if err == nil {
+		return nil
+	}
+	var sdkErr *SDKError
+	if errors.As(err, &sdkErr) {
+		return sdkErr
+	}
+	return &SDKError{
+		Code:    ErrCodeInternal,
+		Message: err.Error(),
+		Err:     err,
+	}
 }
 
 func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {

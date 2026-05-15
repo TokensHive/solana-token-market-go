@@ -14,6 +14,8 @@ type Config struct {
 	SupplyProvider          supply.Provider
 	DebugRequests           bool
 	MaxTxSignatures         int
+	MaxBulkConcurrency      int
+	BulkChunkSize           int
 	PoolCalculatorFactories map[PoolRoute]PoolCalculatorFactory
 }
 
@@ -22,6 +24,8 @@ type Option func(*Config) error
 func defaultConfig() Config {
 	return Config{
 		MaxTxSignatures:         120,
+		MaxBulkConcurrency:      8,
+		BulkChunkSize:           100,
 		PoolCalculatorFactories: map[PoolRoute]PoolCalculatorFactory{},
 	}
 }
@@ -58,6 +62,24 @@ func WithMaxTxSignatures(limit int) Option {
 	return func(cfg *Config) error {
 		if limit > 0 {
 			cfg.MaxTxSignatures = limit
+		}
+		return nil
+	}
+}
+
+func WithMaxBulkConcurrency(limit int) Option {
+	return func(cfg *Config) error {
+		if limit > 0 {
+			cfg.MaxBulkConcurrency = limit
+		}
+		return nil
+	}
+}
+
+func WithBulkChunkSize(size int) Option {
+	return func(cfg *Config) error {
+		if size > 0 {
+			cfg.BulkChunkSize = size
 		}
 		return nil
 	}

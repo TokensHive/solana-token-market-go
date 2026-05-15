@@ -23,6 +23,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MaxTxSignatures != 120 {
 		t.Fatalf("unexpected default max signatures: %d", cfg.MaxTxSignatures)
 	}
+	if cfg.MaxBulkConcurrency != 8 {
+		t.Fatalf("unexpected default max bulk concurrency: %d", cfg.MaxBulkConcurrency)
+	}
+	if cfg.BulkChunkSize != 100 {
+		t.Fatalf("unexpected default bulk chunk size: %d", cfg.BulkChunkSize)
+	}
 	if cfg.PoolCalculatorFactories == nil {
 		t.Fatal("expected default calculator factory map to be initialized")
 	}
@@ -40,6 +46,8 @@ func TestOptionsApply(t *testing.T) {
 		WithSupplyProvider(provider),
 		WithDebugRequests(true),
 		WithMaxTxSignatures(77),
+		WithMaxBulkConcurrency(3),
+		WithBulkChunkSize(77),
 	}
 	for _, opt := range options {
 		if err := opt(&cfg); err != nil {
@@ -50,13 +58,27 @@ func TestOptionsApply(t *testing.T) {
 	if cfg.RPCClient != rpcClient || cfg.QuoteBridge != bridge || cfg.SupplyProvider != provider {
 		t.Fatal("expected options to set clients/providers")
 	}
-	if !cfg.DebugRequests || cfg.MaxTxSignatures != 77 {
-		t.Fatalf("unexpected debug/signature values: debug=%v max=%d", cfg.DebugRequests, cfg.MaxTxSignatures)
+	if !cfg.DebugRequests || cfg.MaxTxSignatures != 77 || cfg.MaxBulkConcurrency != 3 || cfg.BulkChunkSize != 77 {
+		t.Fatalf(
+			"unexpected config values: debug=%v max=%d max_bulk=%d chunk_size=%d",
+			cfg.DebugRequests,
+			cfg.MaxTxSignatures,
+			cfg.MaxBulkConcurrency,
+			cfg.BulkChunkSize,
+		)
 	}
 
 	_ = WithMaxTxSignatures(0)(&cfg)
 	if cfg.MaxTxSignatures != 77 {
 		t.Fatalf("expected max signatures unchanged for invalid limit, got %d", cfg.MaxTxSignatures)
+	}
+	_ = WithMaxBulkConcurrency(0)(&cfg)
+	if cfg.MaxBulkConcurrency != 3 {
+		t.Fatalf("expected max bulk concurrency unchanged for invalid limit, got %d", cfg.MaxBulkConcurrency)
+	}
+	_ = WithBulkChunkSize(0)(&cfg)
+	if cfg.BulkChunkSize != 77 {
+		t.Fatalf("expected bulk chunk size unchanged for invalid limit, got %d", cfg.BulkChunkSize)
 	}
 }
 

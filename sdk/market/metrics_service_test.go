@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
@@ -236,6 +238,212 @@ func TestValidatePumpfunBondingCurveRequest(t *testing.T) {
 		MintB: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
 	}); err != nil {
 		t.Fatalf("expected valid request when one side is SOL, got %v", err)
+	}
+}
+
+func TestGetMetricsByPools_Empty(t *testing.T) {
+	service := NewService(defaultConfig())
+	resp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{})
+	if err != nil {
+		t.Fatalf("expected empty bulk request to succeed, got %v", err)
+	}
+	if resp == nil || len(resp.Results) != 0 {
+		t.Fatalf("expected empty results, got %#v", resp)
+	}
+}
+
+func TestGetMetricsByPools_PartialSuccessAndOrdering(t *testing.T) {
+	route := PoolRoute{Dex: Dex("bulk"), PoolVersion: PoolVersion("v1")}
+	badPoolAddress := marketTestPubkey(201)
+	service := NewService(defaultConfig())
+	service.calculators[route] = poolCalculatorFunc(func(_ context.Context, pool PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+		if pool.PoolAddress.Equals(badPoolAddress) {
+			return nil, NewError(ErrCodeInternal, "calculator failure", nil)
+		}
+		return &GetMetricsByPoolResponse{
+			Pool:          pool,
+			PriceOfAInSOL: decimal.NewFromInt(1),
+		}, nil
+	})
+
+	goodPool := PoolIdentifier{
+		Dex:         route.Dex,
+		PoolVersion: route.PoolVersion,
+		PoolAddress: marketTestPubkey(200),
+	}
+	unsupportedPool := PoolIdentifier{
+		Dex:         Dex("unsupported"),
+		PoolVersion: PoolVersion("v1"),
+		PoolAddress: marketTestPubkey(202),
+	}
+	failingPool := PoolIdentifier{
+		Dex:         route.Dex,
+		PoolVersion: route.PoolVersion,
+		PoolAddress: badPoolAddress,
+	}
+
+	resp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools: []PoolIdentifier{goodPool, unsupportedPool, failingPool},
+	})
+	if err != nil {
+		t.Fatalf("expected bulk response with partial errors, got %v", err)
+	}
+	if len(resp.Results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(resp.Results))
+	}
+
+	if !resp.Results[0].Pool.PoolAddress.Equals(goodPool.PoolAddress) || resp.Results[0].Metrics == nil || resp.Results[0].Error != nil {
+		t.Fatalf("unexpected first result: %#v", resp.Results[0])
+	}
+	if !resp.Results[1].Pool.PoolAddress.Equals(unsupportedPool.PoolAddress) || resp.Results[1].Metrics != nil || resp.Results[1].Error == nil || resp.Results[1].Error.Code != ErrCodeInvalidArgument {
+		t.Fatalf("unexpected second result: %#v", resp.Results[1])
+	}
+	if !resp.Results[2].Pool.PoolAddress.Equals(failingPool.PoolAddress) || resp.Results[2].Metrics != nil || resp.Results[2].Error == nil || resp.Results[2].Error.Code != ErrCodeInternal {
+		t.Fatalf("unexpected third result: %#v", resp.Results[2])
+	}
+}
+
+func TestGetMetricsByPools_MaxConcurrencyRespected(t *testing.T) {
+	route := PoolRoute{Dex: Dex("bulk"), PoolVersion: PoolVersion("v1")}
+	var inFlight int32
+	var maxInFlight int32
+
+	service := NewService(defaultConfig())
+	service.calculators[route] = poolCalculatorFunc(func(_ context.Context, pool PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+		current := atomic.AddInt32(&inFlight, 1)
+		defer atomic.AddInt32(&inFlight, -1)
+
+		for {
+			maxCurrent := atomic.LoadInt32(&maxInFlight)
+			if current <= maxCurrent || atomic.CompareAndSwapInt32(&maxInFlight, maxCurrent, current) {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		return &GetMetricsByPoolResponse{
+			Pool:          pool,
+			PriceOfAInSOL: decimal.NewFromInt(1),
+		}, nil
+	})
+
+	pools := make([]PoolIdentifier, 8)
+	for i := range pools {
+		pools[i] = PoolIdentifier{
+			Dex:         route.Dex,
+			PoolVersion: route.PoolVersion,
+			PoolAddress: marketTestPubkey(byte(i + 1)),
+		}
+	}
+
+	resp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools:          pools,
+		MaxConcurrency: 2,
+	})
+	if err != nil {
+		t.Fatalf("expected bulk execution success, got %v", err)
+	}
+	if len(resp.Results) != len(pools) {
+		t.Fatalf("expected %d results, got %d", len(pools), len(resp.Results))
+	}
+	if atomic.LoadInt32(&maxInFlight) > 2 {
+		t.Fatalf("expected max in-flight <= 2, got %d", maxInFlight)
+	}
+}
+
+func TestGetMetricsByPools_CompatibilityWithSingleCalls(t *testing.T) {
+	route := PoolRoute{Dex: Dex("bulk_compat"), PoolVersion: PoolVersion("v1")}
+	service := NewService(defaultConfig())
+	service.calculators[route] = poolCalculatorFunc(func(_ context.Context, pool PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+		return &GetMetricsByPoolResponse{
+			Pool:          pool,
+			MintA:         solana.SolMint,
+			MintB:         marketTestPubkey(77),
+			PriceOfAInSOL: decimal.NewFromInt(42),
+		}, nil
+	})
+
+	pools := []PoolIdentifier{
+		{Dex: route.Dex, PoolVersion: route.PoolVersion, PoolAddress: marketTestPubkey(70)},
+		{Dex: route.Dex, PoolVersion: route.PoolVersion, PoolAddress: marketTestPubkey(71)},
+	}
+	bulkResp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{Pools: pools})
+	if err != nil {
+		t.Fatalf("expected bulk request success, got %v", err)
+	}
+	if len(bulkResp.Results) != len(pools) {
+		t.Fatalf("expected %d bulk results, got %d", len(pools), len(bulkResp.Results))
+	}
+
+	for i := range pools {
+		singleResp, singleErr := service.GetMetricsByPool(context.Background(), GetMetricsByPoolRequest{Pool: pools[i]})
+		if singleErr != nil {
+			t.Fatalf("expected single request success for item %d, got %v", i, singleErr)
+		}
+		item := bulkResp.Results[i]
+		if item.Error != nil {
+			t.Fatalf("expected nil bulk item error for item %d, got %#v", i, item.Error)
+		}
+		if item.Metrics == nil || !item.Metrics.Pool.PoolAddress.Equals(singleResp.Pool.PoolAddress) || !item.Metrics.PriceOfAInSOL.Equal(singleResp.PriceOfAInSOL) {
+			t.Fatalf("expected bulk and single outputs to match for item %d, bulk=%#v single=%#v", i, item.Metrics, singleResp)
+		}
+	}
+}
+
+func TestGetMetricsByPools_ConcurrencyFallbackBranches(t *testing.T) {
+	route := PoolRoute{Dex: Dex("bulk_fallback"), PoolVersion: PoolVersion("v1")}
+	service := NewService(Config{
+		MaxBulkConcurrency: 0,
+		BulkChunkSize:      0,
+	})
+	service.calculators[route] = poolCalculatorFunc(func(_ context.Context, pool PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+		return &GetMetricsByPoolResponse{
+			Pool:          pool,
+			PriceOfAInSOL: decimal.NewFromInt(1),
+		}, nil
+	})
+
+	pools := []PoolIdentifier{
+		{Dex: route.Dex, PoolVersion: route.PoolVersion, PoolAddress: marketTestPubkey(90)},
+		{Dex: route.Dex, PoolVersion: route.PoolVersion, PoolAddress: marketTestPubkey(91)},
+	}
+	resp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools:          pools,
+		MaxConcurrency: 100, // exercise maxConcurrency > len(req.Pools) branch
+		ChunkSize:      0,   // exercise chunk-size fallback skip when cfg chunk size is also zero
+	})
+	if err != nil {
+		t.Fatalf("expected fallback branch execution to succeed, got %v", err)
+	}
+	if len(resp.Results) != len(pools) {
+		t.Fatalf("expected %d results, got %d", len(pools), len(resp.Results))
+	}
+
+	resp, err = service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools:          pools,
+		MaxConcurrency: 0, // exercise fallback to cfg (0) then hard default to 1
+	})
+	if err != nil {
+		t.Fatalf("expected fallback hard-default concurrency execution to succeed, got %v", err)
+	}
+	if len(resp.Results) != len(pools) {
+		t.Fatalf("expected %d results from hard-default concurrency path, got %d", len(pools), len(resp.Results))
+	}
+}
+
+func TestToSDKErrorBranches(t *testing.T) {
+	if got := toSDKError(nil); got != nil {
+		t.Fatalf("expected nil input to return nil, got %#v", got)
+	}
+
+	sdkErr := NewError(ErrCodeInvalidArgument, "bad", nil)
+	got := toSDKError(sdkErr)
+	if got == nil || got.Code != ErrCodeInvalidArgument || got.Message != "bad" {
+		t.Fatalf("expected existing sdk error passthrough, got %#v", got)
+	}
+
+	got = toSDKError(errors.New("plain"))
+	if got == nil || got.Code != ErrCodeInternal || got.Message != "plain" {
+		t.Fatalf("expected plain error to map to internal sdk error, got %#v", got)
 	}
 }
 
