@@ -10,7 +10,7 @@
 ![Solana Token Market Go SDK Banner](docs/media/solana-token-market-go.png)
 
 On-chain-first Go SDK for deterministic Solana token market metrics.  
-This SDK focuses on a single responsibility: compute price, liquidity, supply, market cap, and FDV for an explicit `(DEX, pool version, mintA, mintB, pool address)` route.
+This SDK focuses on a single responsibility: compute price, liquidity, supply, market cap, and FDV for an explicit `(DEX, pool version, pool address)` route, plus Pump.fun bonding-curve mint-based routes.
 
 ## Demo Video
 
@@ -40,6 +40,7 @@ go get github.com/TokensHive/solana-token-market-go
 - `client.GetMetricsByPool(ctx, request)`
 - `client.GetMetricsByPools(ctx, request)` for bulk pool metrics (partial success per item)
 - `client.GetMetricsByPumpfunBondingCurve(ctx, request)` for Pump.fun `bonding_curve`
+- `client.GetMetricsByPumpfunBondingCurves(ctx, request)` for bulk Pump.fun `bonding_curve` token mints
 - `client.LastRequestDebug()`
 - `market.WithPoolCalculatorFactory(route, factory)` for custom DEX integrations
 
@@ -78,6 +79,24 @@ For Pump.fun `bonding_curve`, use `GetMetricsByPumpfunBondingCurve` (mint-based 
 
 Bulk requests apply bounded concurrency and account-batch chunking automatically to reduce RPC pressure on large pool lists.
 
+## GetMetricsByPumpfunBondingCurves (Bulk) Contract
+
+`market.GetMetricsByPumpfunBondingCurvesRequest` accepts:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `Items` | `[]market.GetMetricsByPumpfunBondingCurveItem` | Token-mint-only inputs. SOL is implied as quote side. |
+| `MaxConcurrency` | `int` | Optional per-call worker cap. Uses client default when omitted or `<= 0`. |
+| `ChunkSize` | `int` | Optional per-call `GetMultipleAccounts` chunk override. Uses client default when omitted or `<= 0`. |
+
+`market.GetMetricsByPumpfunBondingCurvesResponse` returns ordered per-item results:
+
+| Property | Meaning |
+| --- | --- |
+| `Results[i].Item` | Input token mint for item `i` (same ordering as request). |
+| `Results[i].Metrics` | Populated on success. Same schema as `GetMetricsByPoolResponse`. |
+| `Results[i].Error` | Populated on failure for that item (`invalid_argument` for invalid token mint, partial success supported). |
+
 ### Response
 
 `market.GetMetricsByPoolResponse` includes:
@@ -103,7 +122,7 @@ Bulk requests apply bounded concurrency and account-batch chunking automatically
 
 | Pool Version | Program ID (Mainnet) | IDL/Layout | Operations |
 | --- | --- | --- | --- |
-| `bonding_curve` | `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P` | [`pump.json`](https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump.json) | `GetMetricsByPumpfunBondingCurve` |
+| `bonding_curve` | `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P` | [`pump.json`](https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump.json) | `GetMetricsByPumpfunBondingCurve`, `GetMetricsByPumpfunBondingCurves` |
 | `pumpswap_amm` | `pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA` | [`pump_amm.json`](https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump_amm.json) | `GetMetricsByPool` |
 
 ### Raydium
@@ -200,6 +219,33 @@ for _, item := range bulkResp.Results {
 }
 ```
 
+Bulk Pump.fun bonding-curve quick start:
+
+```go
+bondingBulkResp, err := client.GetMetricsByPumpfunBondingCurves(ctx, market.GetMetricsByPumpfunBondingCurvesRequest{
+	Items: []market.GetMetricsByPumpfunBondingCurveItem{
+		{
+			TokenMint: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+		},
+		{
+			TokenMint: solana.MustPublicKeyFromBase58("4rmmtFU6vmCLCuvuHsAWWcE5oNt8MrPbu1taatbdpump"),
+		},
+	},
+	MaxConcurrency: 8,
+	ChunkSize:      100,
+})
+if err != nil {
+	panic(err)
+}
+for _, item := range bondingBulkResp.Results {
+	if item.Error != nil {
+		fmt.Println("bonding curve failed:", item.Item.TokenMint, item.Error)
+		continue
+	}
+	fmt.Println("bonding curve ok:", item.Item.TokenMint, item.Metrics.PriceOfAInSOL)
+}
+```
+
 ## Example CLI
 
 Interactive mode:
@@ -222,7 +268,7 @@ Useful flags:
 
 Bulk tuning options:
 
-- `market.WithMaxBulkConcurrency(n)` to cap pool workers for `GetMetricsByPools`
+- `market.WithMaxBulkConcurrency(n)` to cap workers for `GetMetricsByPools` and `GetMetricsByPumpfunBondingCurves`
 - `market.WithBulkChunkSize(n)` to cap `GetMultipleAccounts` chunk size for large account sets
 
 ## Milestone: Resilience, Performance, and Integrations

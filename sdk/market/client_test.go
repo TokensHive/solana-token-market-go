@@ -211,3 +211,41 @@ func TestNewClientWrapsRPCWithChunkingClient(t *testing.T) {
 		t.Fatalf("expected wrapped RPC to split getMultipleAccounts into 2 calls, got %d", calls)
 	}
 }
+
+func TestGetMetricsByPumpfunBondingCurvesClientDebugLifecycle(t *testing.T) {
+	data := make([]byte, 64)
+	binary.LittleEndian.PutUint64(data[8:16], 1063770573068395)
+	binary.LittleEndian.PutUint64(data[16:24], 30260284408)
+	binary.LittleEndian.PutUint64(data[24:32], 783870573068395)
+	binary.LittleEndian.PutUint64(data[32:40], 260284408)
+	binary.LittleEndian.PutUint64(data[40:48], 1000000000000000)
+
+	client, err := NewClient(
+		WithDebugRequests(true),
+		WithRPCClient(&marketMockRPC{
+			getAccountFn: func(context.Context, solana.PublicKey) (*rpc.AccountInfo, error) {
+				return &rpc.AccountInfo{Exists: true, Data: data}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new client failed: %v", err)
+	}
+
+	resp, err := client.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items: []GetMetricsByPumpfunBondingCurveItem{
+			{
+				TokenMint: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected successful bulk bonding curve client call, got %v", err)
+	}
+	if resp == nil || len(resp.Results) != 1 || resp.Results[0].Metrics == nil {
+		t.Fatalf("expected non-empty bulk bonding response, got %#v", resp)
+	}
+	if debug := client.LastRequestDebug(); debug == nil || debug["operation"] == nil || debug["operation"] != "GetMetricsByPumpfunBondingCurves" {
+		t.Fatalf("expected bulk bonding request debug snapshot, got %#v", debug)
+	}
+}

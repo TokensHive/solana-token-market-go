@@ -1452,3 +1452,175 @@ func TestDefaultOrcaWhirlpoolFactoryErrorMapping(t *testing.T) {
 		t.Fatal("expected wrapped orca whirlpool error")
 	}
 }
+
+func TestValidatePumpfunBondingCurveBulkItem(t *testing.T) {
+	if err := validatePumpfunBondingCurveBulkItem(GetMetricsByPumpfunBondingCurveItem{}); err == nil {
+		t.Fatal("expected token mint required validation error")
+	}
+	if err := validatePumpfunBondingCurveBulkItem(GetMetricsByPumpfunBondingCurveItem{
+		TokenMint: solana.SolMint,
+	}); err == nil {
+		t.Fatal("expected token mint cannot be SOL validation error")
+	}
+	if err := validatePumpfunBondingCurveBulkItem(GetMetricsByPumpfunBondingCurveItem{
+		TokenMint: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump"),
+	}); err != nil {
+		t.Fatalf("expected valid bulk bonding item, got %v", err)
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_Empty(t *testing.T) {
+	service := NewService(defaultConfig())
+	resp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{})
+	if err != nil {
+		t.Fatalf("expected empty bulk bonding request to succeed, got %v", err)
+	}
+	if resp == nil || len(resp.Results) != 0 {
+		t.Fatalf("expected empty bulk bonding results, got %#v", resp)
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_PartialSuccessAndOrdering(t *testing.T) {
+	data := pumpfunBondingCurveTestData()
+	validMintA := solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")
+	validMintB := solana.MustPublicKeyFromBase58("4rmmtFU6vmCLCuvuHsAWWcE5oNt8MrPbu1taatbdpump")
+	failedPoolAddress, _, err := findProgramAddress([][]byte{
+		[]byte(pumpfunBondingCurveSeed),
+		validMintB.Bytes(),
+	}, pumpfunProgramID)
+	if err != nil {
+		t.Fatalf("failed to derive expected pool address for test setup: %v", err)
+	}
+
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getAccountFn: func(_ context.Context, key solana.PublicKey) (*rpc.AccountInfo, error) {
+				// Fail exactly one input mint by matching the derived curve PDA.
+				if key.Equals(failedPoolAddress) {
+					return &rpc.AccountInfo{Address: key, Exists: false}, nil
+				}
+				return &rpc.AccountInfo{Address: key, Exists: true, Data: data}, nil
+			},
+		},
+	})
+
+	invalidMint := solana.SolMint
+
+	resp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items: []GetMetricsByPumpfunBondingCurveItem{
+			{TokenMint: validMintA},
+			{TokenMint: validMintB},
+			{TokenMint: invalidMint},
+		},
+		MaxConcurrency: 2,
+	})
+	if err != nil {
+		t.Fatalf("expected partial-success bulk bonding response, got %v", err)
+	}
+	if len(resp.Results) != 3 {
+		t.Fatalf("expected 3 bulk bonding results, got %d", len(resp.Results))
+	}
+
+	if !resp.Results[0].Item.TokenMint.Equals(validMintA) || resp.Results[0].Metrics == nil || resp.Results[0].Error != nil {
+		t.Fatalf("unexpected first bulk bonding result: %#v", resp.Results[0])
+	}
+	if !resp.Results[1].Item.TokenMint.Equals(validMintB) || resp.Results[1].Metrics != nil || resp.Results[1].Error == nil || resp.Results[1].Error.Code != ErrCodeInternal {
+		t.Fatalf("unexpected second bulk bonding result: %#v", resp.Results[1])
+	}
+	if !resp.Results[2].Item.TokenMint.Equals(invalidMint) || resp.Results[2].Metrics != nil || resp.Results[2].Error == nil || resp.Results[2].Error.Code != ErrCodeInvalidArgument {
+		t.Fatalf("unexpected third bulk bonding result: %#v", resp.Results[2])
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_MaxConcurrencyRespected(t *testing.T) {
+	data := pumpfunBondingCurveTestData()
+	var inFlight int32
+	var maxInFlight int32
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getAccountFn: func(_ context.Context, key solana.PublicKey) (*rpc.AccountInfo, error) {
+				current := atomic.AddInt32(&inFlight, 1)
+				defer atomic.AddInt32(&inFlight, -1)
+				for {
+					maxCurrent := atomic.LoadInt32(&maxInFlight)
+					if current <= maxCurrent || atomic.CompareAndSwapInt32(&maxInFlight, maxCurrent, current) {
+						break
+					}
+				}
+				time.Sleep(10 * time.Millisecond)
+				return &rpc.AccountInfo{Address: key, Exists: true, Data: data}, nil
+			},
+		},
+	})
+
+	items := []GetMetricsByPumpfunBondingCurveItem{
+		{TokenMint: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")},
+		{TokenMint: solana.MustPublicKeyFromBase58("4rmmtFU6vmCLCuvuHsAWWcE5oNt8MrPbu1taatbdpump")},
+		{TokenMint: solana.MustPublicKeyFromBase58("2nCeHpECQvnMfzjU5fDMAKws1vBxMzxvWr6qqLpApump")},
+	}
+	resp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items:          items,
+		MaxConcurrency: 2,
+	})
+	if err != nil {
+		t.Fatalf("expected successful bulk bonding response, got %v", err)
+	}
+	if len(resp.Results) != len(items) {
+		t.Fatalf("expected %d results, got %d", len(items), len(resp.Results))
+	}
+	if atomic.LoadInt32(&maxInFlight) > 2 {
+		t.Fatalf("expected max in-flight <= 2, got %d", maxInFlight)
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_CompatibilityWithSingleCalls(t *testing.T) {
+	data := pumpfunBondingCurveTestData()
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getAccountFn: func(_ context.Context, key solana.PublicKey) (*rpc.AccountInfo, error) {
+				return &rpc.AccountInfo{Address: key, Exists: true, Data: data}, nil
+			},
+		},
+	})
+
+	items := []GetMetricsByPumpfunBondingCurveItem{
+		{TokenMint: solana.MustPublicKeyFromBase58("9BHt7aq3DFCb74kZjPY5epgVtsWKCeYX1tUWxYwDpump")},
+		{TokenMint: solana.MustPublicKeyFromBase58("4rmmtFU6vmCLCuvuHsAWWcE5oNt8MrPbu1taatbdpump")},
+	}
+	bulkResp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items: items,
+	})
+	if err != nil {
+		t.Fatalf("expected bulk bonding request success, got %v", err)
+	}
+	if len(bulkResp.Results) != len(items) {
+		t.Fatalf("expected %d bulk results, got %d", len(items), len(bulkResp.Results))
+	}
+
+	for i := range items {
+		singleResp, singleErr := service.GetMetricsByPumpfunBondingCurve(context.Background(), GetMetricsByPumpfunBondingCurveRequest{
+			MintA: items[i].TokenMint,
+			MintB: solana.SolMint,
+		})
+		if singleErr != nil {
+			t.Fatalf("expected single bonding call success for item %d, got %v", i, singleErr)
+		}
+		item := bulkResp.Results[i]
+		if item.Error != nil || item.Metrics == nil {
+			t.Fatalf("expected successful bulk item for index %d, got %#v", i, item)
+		}
+		if !item.Metrics.Pool.PoolAddress.Equals(singleResp.Pool.PoolAddress) || !item.Metrics.PriceOfAInSOL.Equal(singleResp.PriceOfAInSOL) {
+			t.Fatalf("expected bulk/single bonding outputs to match for item %d, bulk=%#v single=%#v", i, item.Metrics, singleResp)
+		}
+	}
+}
+
+func pumpfunBondingCurveTestData() []byte {
+	data := make([]byte, 64)
+	binary.LittleEndian.PutUint64(data[8:16], 1063770573068395)
+	binary.LittleEndian.PutUint64(data[16:24], 30260284408)
+	binary.LittleEndian.PutUint64(data[24:32], 783870573068395)
+	binary.LittleEndian.PutUint64(data[32:40], 260284408)
+	binary.LittleEndian.PutUint64(data[40:48], 1000000000000000)
+	return data
+}

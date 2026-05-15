@@ -53,6 +53,16 @@ type GetMetricsByPumpfunBondingCurveRequest struct {
 	MintB solana.PublicKey
 }
 
+type GetMetricsByPumpfunBondingCurveItem struct {
+	TokenMint solana.PublicKey
+}
+
+type GetMetricsByPumpfunBondingCurvesRequest struct {
+	Items          []GetMetricsByPumpfunBondingCurveItem
+	MaxConcurrency int
+	ChunkSize      int
+}
+
 type GetMetricsByPoolItemResult struct {
 	Pool    PoolIdentifier
 	Metrics *GetMetricsByPoolResponse
@@ -61,6 +71,16 @@ type GetMetricsByPoolItemResult struct {
 
 type GetMetricsByPoolsResponse struct {
 	Results []GetMetricsByPoolItemResult
+}
+
+type GetMetricsByPumpfunBondingCurveItemResult struct {
+	Item    GetMetricsByPumpfunBondingCurveItem
+	Metrics *GetMetricsByPoolResponse
+	Error   *SDKError
+}
+
+type GetMetricsByPumpfunBondingCurvesResponse struct {
+	Results []GetMetricsByPumpfunBondingCurveItemResult
 }
 
 type GetMetricsByPoolResponse struct {

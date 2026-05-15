@@ -44,6 +44,12 @@ func (c *Client) GetMetricsByPools(ctx context.Context, req GetMetricsByPoolsReq
 	return c.service.GetMetricsByPools(ctx, req)
 }
 
+func (c *Client) GetMetricsByPumpfunBondingCurves(ctx context.Context, req GetMetricsByPumpfunBondingCurvesRequest) (*GetMetricsByPumpfunBondingCurvesResponse, error) {
+	ctx, recorder := c.startDebug(ctx, "GetMetricsByPumpfunBondingCurves")
+	defer c.finishDebug(recorder)
+	return c.service.GetMetricsByPumpfunBondingCurves(ctx, req)
+}
+
 func (s *Service) GetMetricsByPool(ctx context.Context, req GetMetricsByPoolRequest) (*GetMetricsByPoolResponse, error) {
 	if err := validateMetricsRequest(req); err != nil {
 		return nil, err
@@ -176,6 +182,69 @@ func (s *Service) GetMetricsByPools(ctx context.Context, req GetMetricsByPoolsRe
 	return &GetMetricsByPoolsResponse{Results: results}, nil
 }
 
+func (s *Service) GetMetricsByPumpfunBondingCurves(ctx context.Context, req GetMetricsByPumpfunBondingCurvesRequest) (*GetMetricsByPumpfunBondingCurvesResponse, error) {
+	if len(req.Items) == 0 {
+		return &GetMetricsByPumpfunBondingCurvesResponse{Results: []GetMetricsByPumpfunBondingCurveItemResult{}}, nil
+	}
+
+	maxConcurrency := req.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = s.cfg.MaxBulkConcurrency
+	}
+	if maxConcurrency <= 0 {
+		maxConcurrency = 1
+	}
+	if maxConcurrency > len(req.Items) {
+		maxConcurrency = len(req.Items)
+	}
+
+	itemCtx := ctx
+	chunkSize := req.ChunkSize
+	if chunkSize <= 0 {
+		chunkSize = s.cfg.BulkChunkSize
+	}
+	if chunkSize > 0 {
+		itemCtx = rpc.WithGetMultipleAccountsChunkSize(itemCtx, chunkSize)
+	}
+
+	results := make([]GetMetricsByPumpfunBondingCurveItemResult, len(req.Items))
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+
+	for i := range req.Items {
+		i := i
+		item := req.Items[i]
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result := GetMetricsByPumpfunBondingCurveItemResult{Item: item}
+			if err := validatePumpfunBondingCurveBulkItem(item); err != nil {
+				result.Error = toSDKError(err)
+				results[i] = result
+				return
+			}
+
+			metrics, err := s.GetMetricsByPumpfunBondingCurve(itemCtx, GetMetricsByPumpfunBondingCurveRequest{
+				MintA: item.TokenMint,
+				MintB: solana.SolMint,
+			})
+			if err != nil {
+				result.Error = toSDKError(err)
+			} else {
+				result.Metrics = metrics
+			}
+			results[i] = result
+		}()
+	}
+
+	wg.Wait()
+	return &GetMetricsByPumpfunBondingCurvesResponse{Results: results}, nil
+}
+
 func validateMetricsRequest(req GetMetricsByPoolRequest) error {
 	if req.Pool.Dex == "" {
 		return NewError(ErrCodeInvalidArgument, "pool dex is required", nil)
@@ -195,6 +264,16 @@ func validatePumpfunBondingCurveRequest(req GetMetricsByPumpfunBondingCurveReque
 	}
 	if !solana.SolMint.Equals(req.MintA) && !solana.SolMint.Equals(req.MintB) {
 		return NewError(ErrCodeInvalidArgument, "pumpfun bonding curve requires one side to be SOL", nil)
+	}
+	return nil
+}
+
+func validatePumpfunBondingCurveBulkItem(item GetMetricsByPumpfunBondingCurveItem) error {
+	if item.TokenMint.IsZero() {
+		return NewError(ErrCodeInvalidArgument, "token mint is required", nil)
+	}
+	if solana.SolMint.Equals(item.TokenMint) {
+		return NewError(ErrCodeInvalidArgument, "token mint cannot be SOL", nil)
 	}
 	return nil
 }
