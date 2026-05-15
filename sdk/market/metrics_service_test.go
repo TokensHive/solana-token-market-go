@@ -295,7 +295,7 @@ func TestGetMetricsByPools_PartialSuccessAndOrdering(t *testing.T) {
 	if !resp.Results[0].Pool.PoolAddress.Equals(goodPool.PoolAddress) || resp.Results[0].Metrics == nil || resp.Results[0].Error != nil {
 		t.Fatalf("unexpected first result: %#v", resp.Results[0])
 	}
-	if !resp.Results[1].Pool.PoolAddress.Equals(unsupportedPool.PoolAddress) || resp.Results[1].Metrics != nil || resp.Results[1].Error == nil || resp.Results[1].Error.Code != ErrCodeInvalidArgument {
+	if !resp.Results[1].Pool.PoolAddress.Equals(unsupportedPool.PoolAddress) || resp.Results[1].Metrics != nil || resp.Results[1].Error == nil || resp.Results[1].Error.Code != ErrCodeUnsupportedRoute {
 		t.Fatalf("unexpected second result: %#v", resp.Results[1])
 	}
 	if !resp.Results[2].Pool.PoolAddress.Equals(failingPool.PoolAddress) || resp.Results[2].Metrics != nil || resp.Results[2].Error == nil || resp.Results[2].Error.Code != ErrCodeInternal {
@@ -347,6 +347,67 @@ func TestGetMetricsByPools_MaxConcurrencyRespected(t *testing.T) {
 	}
 	if atomic.LoadInt32(&maxInFlight) > 2 {
 		t.Fatalf("expected max in-flight <= 2, got %d", maxInFlight)
+	}
+}
+
+func TestGetMetricsByPools_UsesBulkLoadingInsteadOfGetAccountStorm(t *testing.T) {
+	route := PoolRoute{Dex: Dex("bulk_loader"), PoolVersion: PoolVersion("v1")}
+	var getAccountCalls int32
+	var getMultipleCalls int32
+
+	mockRPC := &marketMockRPC{
+		getAccountFn: func(context.Context, solana.PublicKey) (*rpc.AccountInfo, error) {
+			atomic.AddInt32(&getAccountCalls, 1)
+			return &rpc.AccountInfo{Exists: true, Data: []byte{1}}, nil
+		},
+		getMultipleAccountsFn: func(_ context.Context, keys []solana.PublicKey) ([]*rpc.AccountInfo, error) {
+			atomic.AddInt32(&getMultipleCalls, 1)
+			out := make([]*rpc.AccountInfo, len(keys))
+			for i := range keys {
+				out[i] = &rpc.AccountInfo{Address: keys[i], Exists: true, Data: []byte{1}}
+			}
+			return out, nil
+		},
+	}
+
+	service := NewService(Config{
+		RPCClient: mockRPC,
+		PoolCalculatorFactories: map[PoolRoute]PoolCalculatorFactory{
+			route: func(cfg Config) PoolCalculator {
+				return poolCalculatorFunc(func(ctx context.Context, pool PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+					if _, err := cfg.RPCClient.GetAccount(ctx, pool.PoolAddress); err != nil {
+						return nil, err
+					}
+					return &GetMetricsByPoolResponse{Pool: pool, PriceOfAInSOL: decimal.NewFromInt(1)}, nil
+				})
+			},
+		},
+	})
+
+	pools := make([]PoolIdentifier, 100)
+	for i := range pools {
+		pools[i] = PoolIdentifier{
+			Dex:         route.Dex,
+			PoolVersion: route.PoolVersion,
+			PoolAddress: marketTestPubkey(byte(i + 1)),
+		}
+	}
+	resp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools:          pools,
+		MaxConcurrency: 4,
+		ChunkSize:      25,
+	})
+	if err != nil {
+		t.Fatalf("expected bulk loading success, got %v", err)
+	}
+	if len(resp.Results) != len(pools) {
+		t.Fatalf("expected %d results, got %d", len(pools), len(resp.Results))
+	}
+	if atomic.LoadInt32(&getAccountCalls) != 0 {
+		t.Fatalf("expected pooled getAccount calls to be served from preloaded cache, got %d", getAccountCalls)
+	}
+	if atomic.LoadInt32(&getMultipleCalls) == 0 {
+		t.Fatal("expected getMultipleAccounts to be used")
 	}
 }
 
@@ -430,6 +491,48 @@ func TestGetMetricsByPools_ConcurrencyFallbackBranches(t *testing.T) {
 	}
 }
 
+func TestGetMetricsByPools_AllInvalidShortCircuit(t *testing.T) {
+	service := NewService(defaultConfig())
+	resp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools: []PoolIdentifier{
+			{},
+			{Dex: DexPumpfun, PoolVersion: PoolVersionPumpfunBondingCurve, PoolAddress: marketTestPubkey(2)},
+			{Dex: Dex("unknown"), PoolVersion: PoolVersion("v1"), PoolAddress: marketTestPubkey(1)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected all-invalid bulk request to return per-item errors, got %v", err)
+	}
+	if len(resp.Results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(resp.Results))
+	}
+	if resp.Results[0].Error == nil || resp.Results[1].Error == nil || resp.Results[2].Error == nil {
+		t.Fatalf("expected both items to contain errors, got %#v", resp.Results)
+	}
+}
+
+func TestGetMetricsByPools_PrimeAccountsErrorPath(t *testing.T) {
+	route := PoolRoute{Dex: DexPumpfun, PoolVersion: PoolVersionPumpfunAmm}
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getMultipleAccountsFn: func(context.Context, []solana.PublicKey) ([]*rpc.AccountInfo, error) {
+				return nil, errors.New("HTTP 429")
+			},
+		},
+	})
+	resp, err := service.GetMetricsByPools(context.Background(), GetMetricsByPoolsRequest{
+		Pools: []PoolIdentifier{
+			{Dex: route.Dex, PoolVersion: route.PoolVersion, PoolAddress: marketTestPubkey(11)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected partial error response, got %v", err)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].Error == nil || resp.Results[0].Error.Code != ErrCodeRateLimited {
+		t.Fatalf("expected rate_limited item error from prime-accounts path, got %#v", resp)
+	}
+}
+
 func TestToSDKErrorBranches(t *testing.T) {
 	if got := toSDKError(nil); got != nil {
 		t.Fatalf("expected nil input to return nil, got %#v", got)
@@ -444,6 +547,41 @@ func TestToSDKErrorBranches(t *testing.T) {
 	got = toSDKError(errors.New("plain"))
 	if got == nil || got.Code != ErrCodeInternal || got.Message != "plain" {
 		t.Fatalf("expected plain error to map to internal sdk error, got %#v", got)
+	}
+
+	got = toSDKError(NewError(ErrCodeInternal, "wrapped", errors.New("HTTP 429")))
+	if got == nil || got.Code != ErrCodeRateLimited {
+		t.Fatalf("expected internal sdk error with wrapped 429 to be remapped, got %#v", got)
+	}
+
+	got = toSDKError(errors.New("HTTP 429 RateLimitExceeded"))
+	if got == nil || got.Code != ErrCodeRateLimited {
+		t.Fatalf("expected 429 to map to rate_limited sdk error, got %#v", got)
+	}
+
+	got = toSDKError(context.DeadlineExceeded)
+	if got == nil || got.Code != ErrCodeTimeout {
+		t.Fatalf("expected deadline exceeded to map to timeout sdk error, got %#v", got)
+	}
+}
+
+func TestCanRebuildRoute(t *testing.T) {
+	cfg := defaultConfig()
+	customRoute := PoolRoute{Dex: Dex("custom"), PoolVersion: PoolVersion("v1")}
+	cfg.PoolCalculatorFactories[customRoute] = func(Config) PoolCalculator {
+		return poolCalculatorFunc(func(context.Context, PoolIdentifier) (*GetMetricsByPoolResponse, error) {
+			return &GetMetricsByPoolResponse{}, nil
+		})
+	}
+	service := NewService(cfg)
+	if !service.canRebuildRoute(customRoute) {
+		t.Fatal("expected custom route to be rebuildable")
+	}
+	if !service.canRebuildRoute(PoolRoute{Dex: DexPumpfun, PoolVersion: PoolVersionPumpfunAmm}) {
+		t.Fatal("expected default route to be rebuildable")
+	}
+	if service.canRebuildRoute(PoolRoute{Dex: Dex("x"), PoolVersion: PoolVersion("y")}) {
+		t.Fatal("expected unknown route to be non-rebuildable")
 	}
 }
 
@@ -1524,11 +1662,128 @@ func TestGetMetricsByPumpfunBondingCurves_PartialSuccessAndOrdering(t *testing.T
 	if !resp.Results[0].Item.TokenMint.Equals(validMintA) || resp.Results[0].Metrics == nil || resp.Results[0].Error != nil {
 		t.Fatalf("unexpected first bulk bonding result: %#v", resp.Results[0])
 	}
-	if !resp.Results[1].Item.TokenMint.Equals(validMintB) || resp.Results[1].Metrics != nil || resp.Results[1].Error == nil || resp.Results[1].Error.Code != ErrCodeInternal {
+	if !resp.Results[1].Item.TokenMint.Equals(validMintB) || resp.Results[1].Metrics != nil || resp.Results[1].Error == nil || resp.Results[1].Error.Code != ErrCodeAccountNotFound {
 		t.Fatalf("unexpected second bulk bonding result: %#v", resp.Results[1])
 	}
 	if !resp.Results[2].Item.TokenMint.Equals(invalidMint) || resp.Results[2].Metrics != nil || resp.Results[2].Error == nil || resp.Results[2].Error.Code != ErrCodeInvalidArgument {
 		t.Fatalf("unexpected third bulk bonding result: %#v", resp.Results[2])
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_ChunkedBulkFetch(t *testing.T) {
+	data := pumpfunBondingCurveTestData()
+	var getAccountCalls int32
+	var getMultipleCalls int32
+	inner := &marketMockRPC{
+		getAccountFn: func(context.Context, solana.PublicKey) (*rpc.AccountInfo, error) {
+			atomic.AddInt32(&getAccountCalls, 1)
+			return &rpc.AccountInfo{Exists: true, Data: data}, nil
+		},
+		getMultipleAccountsFn: func(_ context.Context, keys []solana.PublicKey) ([]*rpc.AccountInfo, error) {
+			atomic.AddInt32(&getMultipleCalls, 1)
+			out := make([]*rpc.AccountInfo, len(keys))
+			for i := range keys {
+				out[i] = &rpc.AccountInfo{Address: keys[i], Exists: true, Data: data}
+			}
+			return out, nil
+		},
+	}
+	service := NewService(Config{
+		RPCClient: rpc.NewChunkingClient(inner, 10),
+	})
+
+	items := make([]GetMetricsByPumpfunBondingCurveItem, 100)
+	for i := range items {
+		items[i] = GetMetricsByPumpfunBondingCurveItem{
+			TokenMint: marketTestPubkey(byte(i + 1)),
+		}
+	}
+	resp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items:     items,
+		ChunkSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("expected chunked bonding bulk success, got %v", err)
+	}
+	if len(resp.Results) != len(items) {
+		t.Fatalf("expected %d results, got %d", len(items), len(resp.Results))
+	}
+	if atomic.LoadInt32(&getAccountCalls) != 0 {
+		t.Fatalf("expected no direct getAccount calls due preloaded bulk fetch, got %d", getAccountCalls)
+	}
+	if atomic.LoadInt32(&getMultipleCalls) < 10 {
+		t.Fatalf("expected chunked getMultipleAccounts calls, got %d", getMultipleCalls)
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_PrimeError(t *testing.T) {
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getMultipleAccountsFn: func(context.Context, []solana.PublicKey) ([]*rpc.AccountInfo, error) {
+				return nil, errors.New("HTTP 429")
+			},
+		},
+	})
+	resp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items: []GetMetricsByPumpfunBondingCurveItem{
+			{TokenMint: marketTestPubkey(12)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected per-item prime error response, got %v", err)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].Error == nil || resp.Results[0].Error.Code != ErrCodeRateLimited {
+		t.Fatalf("expected rate_limited bonding bulk error, got %#v", resp)
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_AllInvalidSkipsBulkFetch(t *testing.T) {
+	var getMultipleCalls int32
+	service := NewService(Config{
+		RPCClient: &marketMockRPC{
+			getMultipleAccountsFn: func(context.Context, []solana.PublicKey) ([]*rpc.AccountInfo, error) {
+				atomic.AddInt32(&getMultipleCalls, 1)
+				return nil, nil
+			},
+		},
+	})
+	resp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items: []GetMetricsByPumpfunBondingCurveItem{
+			{},
+			{TokenMint: solana.SolMint},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected all-invalid items to return per-item errors, got %v", err)
+	}
+	if len(resp.Results) != 2 || resp.Results[0].Error == nil || resp.Results[1].Error == nil {
+		t.Fatalf("expected invalid item errors, got %#v", resp)
+	}
+	if atomic.LoadInt32(&getMultipleCalls) != 0 {
+		t.Fatalf("expected no bulk fetch when all inputs invalid, got %d", getMultipleCalls)
+	}
+}
+
+func TestGetMetricsByPumpfunBondingCurves_DeriveError(t *testing.T) {
+	originalFindProgramAddress := findProgramAddress
+	findProgramAddress = func(_ [][]byte, _ solana.PublicKey) (solana.PublicKey, uint8, error) {
+		return solana.PublicKey{}, 0, errors.New("derive failed")
+	}
+	defer func() {
+		findProgramAddress = originalFindProgramAddress
+	}()
+
+	service := NewService(defaultConfig())
+	resp, err := service.GetMetricsByPumpfunBondingCurves(context.Background(), GetMetricsByPumpfunBondingCurvesRequest{
+		Items: []GetMetricsByPumpfunBondingCurveItem{
+			{TokenMint: marketTestPubkey(55)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected per-item derive error response, got %v", err)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].Error == nil {
+		t.Fatalf("expected derive error in first result, got %#v", resp)
 	}
 }
 

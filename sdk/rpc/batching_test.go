@@ -233,4 +233,15 @@ func TestChunkingClientGetMultipleAccountsBranchCoverage(t *testing.T) {
 	if len(out) != len(addresses) || !out[0].Exists || !out[1].Exists {
 		t.Fatalf("expected passthrough unchunked output, got %#v", out)
 	}
+
+	manual := &chunkingClient{
+		inner: baseUnchunked,
+	}
+	out, err = manual.GetMultipleAccounts(context.Background(), addresses)
+	if err != nil {
+		t.Fatalf("expected manual chunking client with zero chunk size to passthrough, got %v", err)
+	}
+	if len(out) != len(addresses) {
+		t.Fatalf("expected passthrough result count for manual chunking client, got %#v", out)
+	}
 }

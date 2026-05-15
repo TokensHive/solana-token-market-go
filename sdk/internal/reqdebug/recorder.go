@@ -32,6 +32,7 @@ type Recorder struct {
 	apiCalls            []apiCallDuration
 	rpcTotal            int
 	apiTotal            int
+	annotations         map[string]any
 }
 
 func NewRecorder(operation string) *Recorder {
@@ -44,6 +45,7 @@ func NewRecorder(operation string) *Recorder {
 		rpcDurationByType:   map[string]int64{},
 		apiDurationByType:   map[string]int64{},
 		apiDurationBySource: map[string]int64{},
+		annotations:         map[string]any{},
 	}
 }
 
@@ -81,6 +83,18 @@ func (r *Recorder) MarkDone() {
 	}
 	r.mu.Lock()
 	r.durationMS = time.Since(r.startedAt).Milliseconds()
+	r.mu.Unlock()
+}
+
+func (r *Recorder) Annotate(key string, value any) {
+	if r == nil || key == "" {
+		return
+	}
+	r.mu.Lock()
+	if r.annotations == nil {
+		r.annotations = map[string]any{}
+	}
+	r.annotations[key] = value
 	r.mu.Unlock()
 }
 
@@ -122,6 +136,10 @@ func (r *Recorder) SnapshotMap() map[string]any {
 	copy(rpcCalls, r.rpcCalls)
 	apiCalls := make([]apiCallDuration, len(r.apiCalls))
 	copy(apiCalls, r.apiCalls)
+	annotations := make(map[string]any, len(r.annotations))
+	for k, v := range r.annotations {
+		annotations[k] = v
+	}
 	return map[string]any{
 		"operation":   r.operation,
 		"duration_ms": durationMS,
@@ -139,6 +157,7 @@ func (r *Recorder) SnapshotMap() map[string]any {
 			"duration_by_type_ms":   apiDurationByType,
 			"calls":                 apiCalls,
 		},
+		"annotations": annotations,
 	}
 }
 

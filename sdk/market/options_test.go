@@ -29,6 +29,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.BulkChunkSize != 100 {
 		t.Fatalf("unexpected default bulk chunk size: %d", cfg.BulkChunkSize)
 	}
+	if cfg.RPCRetryMaxRetries != 2 || cfg.RPCRetryInitialBackoff != 100 || cfg.RPCRetryMaxBackoff != 1200 || cfg.RPCRetryJitterFraction != 0.2 {
+		t.Fatalf(
+			"unexpected rpc retry defaults: retries=%d initial=%d max=%d jitter=%v",
+			cfg.RPCRetryMaxRetries,
+			cfg.RPCRetryInitialBackoff,
+			cfg.RPCRetryMaxBackoff,
+			cfg.RPCRetryJitterFraction,
+		)
+	}
 	if cfg.PoolCalculatorFactories == nil {
 		t.Fatal("expected default calculator factory map to be initialized")
 	}
@@ -48,6 +57,10 @@ func TestOptionsApply(t *testing.T) {
 		WithMaxTxSignatures(77),
 		WithMaxBulkConcurrency(3),
 		WithBulkChunkSize(77),
+		WithRPCRetryMaxRetries(4),
+		WithRPCRetryInitialBackoffMS(250),
+		WithRPCRetryMaxBackoffMS(750),
+		WithRPCRetryJitterFraction(0.4),
 	}
 	for _, opt := range options {
 		if err := opt(&cfg); err != nil {
@@ -58,13 +71,17 @@ func TestOptionsApply(t *testing.T) {
 	if cfg.RPCClient != rpcClient || cfg.QuoteBridge != bridge || cfg.SupplyProvider != provider {
 		t.Fatal("expected options to set clients/providers")
 	}
-	if !cfg.DebugRequests || cfg.MaxTxSignatures != 77 || cfg.MaxBulkConcurrency != 3 || cfg.BulkChunkSize != 77 {
+	if !cfg.DebugRequests || cfg.MaxTxSignatures != 77 || cfg.MaxBulkConcurrency != 3 || cfg.BulkChunkSize != 77 || cfg.RPCRetryMaxRetries != 4 || cfg.RPCRetryInitialBackoff != 250 || cfg.RPCRetryMaxBackoff != 750 || cfg.RPCRetryJitterFraction != 0.4 {
 		t.Fatalf(
-			"unexpected config values: debug=%v max=%d max_bulk=%d chunk_size=%d",
+			"unexpected config values: debug=%v max=%d max_bulk=%d chunk_size=%d retries=%d initial=%d max_retry_backoff=%d jitter=%v",
 			cfg.DebugRequests,
 			cfg.MaxTxSignatures,
 			cfg.MaxBulkConcurrency,
 			cfg.BulkChunkSize,
+			cfg.RPCRetryMaxRetries,
+			cfg.RPCRetryInitialBackoff,
+			cfg.RPCRetryMaxBackoff,
+			cfg.RPCRetryJitterFraction,
 		)
 	}
 
@@ -79,6 +96,18 @@ func TestOptionsApply(t *testing.T) {
 	_ = WithBulkChunkSize(0)(&cfg)
 	if cfg.BulkChunkSize != 77 {
 		t.Fatalf("expected bulk chunk size unchanged for invalid limit, got %d", cfg.BulkChunkSize)
+	}
+	_ = WithRPCRetryInitialBackoffMS(0)(&cfg)
+	if cfg.RPCRetryInitialBackoff != 250 {
+		t.Fatalf("expected retry initial backoff unchanged for invalid limit, got %d", cfg.RPCRetryInitialBackoff)
+	}
+	_ = WithRPCRetryMaxBackoffMS(0)(&cfg)
+	if cfg.RPCRetryMaxBackoff != 750 {
+		t.Fatalf("expected retry max backoff unchanged for invalid limit, got %d", cfg.RPCRetryMaxBackoff)
+	}
+	_ = WithRPCRetryJitterFraction(-1)(&cfg)
+	if cfg.RPCRetryJitterFraction != 0.4 {
+		t.Fatalf("expected retry jitter unchanged for invalid value, got %v", cfg.RPCRetryJitterFraction)
 	}
 }
 

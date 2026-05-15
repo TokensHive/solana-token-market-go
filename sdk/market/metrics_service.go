@@ -18,6 +18,7 @@ import (
 	raydiumlaunchpad "github.com/TokensHive/solana-token-market-go/sdk/protocols/raydium/launchpad"
 	raydiumv4 "github.com/TokensHive/solana-token-market-go/sdk/protocols/raydium/liquidity_v4"
 	"github.com/TokensHive/solana-token-market-go/sdk/rpc"
+	"github.com/TokensHive/solana-token-market-go/sdk/supply"
 	"github.com/gagliardetto/solana-go"
 )
 
@@ -68,7 +69,7 @@ func (s *Service) GetMetricsByPool(ctx context.Context, req GetMetricsByPoolRequ
 	}
 	calculator, ok := s.calculators[route]
 	if !ok || calculator == nil {
-		return nil, NewError(ErrCodeInvalidArgument, fmt.Sprintf("unsupported pool route: %s/%s", req.Pool.Dex, req.Pool.PoolVersion), nil)
+		return nil, NewError(ErrCodeUnsupportedRoute, fmt.Sprintf("unsupported pool route: %s/%s", req.Pool.Dex, req.Pool.PoolVersion), nil)
 	}
 
 	resp, err := calculator.Compute(ctx, req.Pool)
@@ -93,7 +94,7 @@ func (s *Service) GetMetricsByPumpfunBondingCurve(ctx context.Context, req GetMe
 		tokenMint.Bytes(),
 	}, pumpfunProgramID)
 	if err != nil {
-		return nil, NewError(ErrCodeInternal, "derive pumpfun bonding curve address", err)
+		return nil, NewError(classifyErrorCode(err), "derive pumpfun bonding curve address", err)
 	}
 
 	calculator := pumpcurve.NewCalculator(s.cfg.RPCClient, s.cfg.QuoteBridge)
@@ -103,7 +104,7 @@ func (s *Service) GetMetricsByPumpfunBondingCurve(ctx context.Context, req GetMe
 		MintB:       req.MintB,
 	})
 	if err != nil {
-		return nil, NewError(ErrCodeInternal, "pumpfun bonding curve metrics failed", err)
+		return nil, NewError(classifyErrorCode(err), "pumpfun bonding curve metrics failed", err)
 	}
 	resp := buildMetricsResponse(
 		PoolIdentifier{
@@ -133,33 +134,60 @@ func (s *Service) GetMetricsByPools(ctx context.Context, req GetMetricsByPoolsRe
 		return &GetMetricsByPoolsResponse{Results: []GetMetricsByPoolItemResult{}}, nil
 	}
 
-	maxConcurrency := req.MaxConcurrency
-	if maxConcurrency <= 0 {
-		maxConcurrency = s.cfg.MaxBulkConcurrency
-	}
-	if maxConcurrency <= 0 {
-		maxConcurrency = 1
-	}
-	if maxConcurrency > len(req.Pools) {
-		maxConcurrency = len(req.Pools)
-	}
-
-	itemCtx := ctx
-	chunkSize := req.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = s.cfg.BulkChunkSize
-	}
-	if chunkSize > 0 {
-		itemCtx = rpc.WithGetMultipleAccountsChunkSize(itemCtx, chunkSize)
-	}
-
 	results := make([]GetMetricsByPoolItemResult, len(req.Pools))
+	for i := range req.Pools {
+		results[i] = GetMetricsByPoolItemResult{Pool: req.Pools[i]}
+	}
+
+	maxConcurrency, itemCtx := s.resolveBulkExecution(req.MaxConcurrency, req.ChunkSize, len(req.Pools), ctx)
+	grouped := make(map[PoolRoute][]int, len(req.Pools))
+	for i, pool := range req.Pools {
+		if err := validateMetricsRequest(GetMetricsByPoolRequest{Pool: pool}); err != nil {
+			results[i].Error = toSDKError(err)
+			continue
+		}
+		if pool.Dex == DexPumpfun && pool.PoolVersion == PoolVersionPumpfunBondingCurve {
+			results[i].Error = toSDKError(NewError(
+				ErrCodeInvalidArgument,
+				"pumpfun bonding_curve requires GetMetricsByPumpfunBondingCurve (mint-based) instead of GetMetricsByPool",
+				nil,
+			))
+			continue
+		}
+		route := PoolRoute{Dex: pool.Dex, PoolVersion: pool.PoolVersion}
+		if _, ok := s.calculators[route]; !ok {
+			results[i].Error = toSDKError(NewError(
+				ErrCodeUnsupportedRoute,
+				fmt.Sprintf("unsupported pool route: %s/%s", pool.Dex, pool.PoolVersion),
+				nil,
+			))
+			continue
+		}
+		grouped[route] = append(grouped[route], i)
+	}
+
+	var groups []PoolRoute
+	for route := range grouped {
+		groups = append(groups, route)
+	}
+	if len(groups) == 0 {
+		s.annotateBulkDebug(itemCtx, "GetMetricsByPools", nil, results, rpc.PreloadStats{})
+		return &GetMetricsByPoolsResponse{Results: results}, nil
+	}
+	if maxConcurrency > len(groups) {
+		maxConcurrency = len(groups)
+	}
+
 	sem := make(chan struct{}, maxConcurrency)
 	var wg sync.WaitGroup
+	var resultMu sync.Mutex
+	totalStats := rpc.PreloadStats{}
+	groupNames := make([]string, len(groups))
 
-	for i := range req.Pools {
-		i := i
-		pool := req.Pools[i]
+	for groupIndex := range groups {
+		route := groups[groupIndex]
+		groupNames[groupIndex] = fmt.Sprintf("%s/%s", route.Dex, route.PoolVersion)
+		indices := grouped[route]
 
 		wg.Add(1)
 		sem <- struct{}{}
@@ -167,18 +195,54 @@ func (s *Service) GetMetricsByPools(ctx context.Context, req GetMetricsByPoolsRe
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			item := GetMetricsByPoolItemResult{Pool: pool}
-			metrics, err := s.GetMetricsByPool(itemCtx, GetMetricsByPoolRequest{Pool: pool})
-			if err != nil {
-				item.Error = toSDKError(err)
-			} else {
-				item.Metrics = metrics
+			preloaded := rpc.NewPreloadedClient(s.cfg.RPCClient)
+			addresses := make([]solana.PublicKey, len(indices))
+			for i, index := range indices {
+				addresses[i] = req.Pools[index].PoolAddress
 			}
-			results[i] = item
+			if err := preloaded.PrimeAccounts(itemCtx, addresses); err != nil {
+				for _, index := range indices {
+					resultMu.Lock()
+					results[index].Error = toSDKError(err)
+					resultMu.Unlock()
+				}
+				resultMu.Lock()
+				stats := preloaded.Stats()
+				totalStats.GetAccountCalls += stats.GetAccountCalls
+				totalStats.GetMultipleAccountsCalls += stats.GetMultipleAccountsCalls
+				totalStats.TotalAccountsRequested += stats.TotalAccountsRequested
+				resultMu.Unlock()
+				return
+			}
+
+			groupService := s.withRPCClient(preloaded)
+			computeService := groupService
+			if !s.canRebuildRoute(route) {
+				computeService = s
+			}
+			for _, index := range indices {
+				pool := req.Pools[index]
+				metrics, err := computeService.GetMetricsByPool(itemCtx, GetMetricsByPoolRequest{Pool: pool})
+				resultMu.Lock()
+				if err != nil {
+					results[index].Error = toSDKError(err)
+				} else {
+					results[index].Metrics = metrics
+				}
+				resultMu.Unlock()
+			}
+
+			resultMu.Lock()
+			stats := preloaded.Stats()
+			totalStats.GetAccountCalls += stats.GetAccountCalls
+			totalStats.GetMultipleAccountsCalls += stats.GetMultipleAccountsCalls
+			totalStats.TotalAccountsRequested += stats.TotalAccountsRequested
+			resultMu.Unlock()
 		}()
 	}
 
 	wg.Wait()
+	s.annotateBulkDebug(itemCtx, "GetMetricsByPools", groupNames, results, totalStats)
 	return &GetMetricsByPoolsResponse{Results: results}, nil
 }
 
@@ -187,61 +251,57 @@ func (s *Service) GetMetricsByPumpfunBondingCurves(ctx context.Context, req GetM
 		return &GetMetricsByPumpfunBondingCurvesResponse{Results: []GetMetricsByPumpfunBondingCurveItemResult{}}, nil
 	}
 
-	maxConcurrency := req.MaxConcurrency
-	if maxConcurrency <= 0 {
-		maxConcurrency = s.cfg.MaxBulkConcurrency
-	}
-	if maxConcurrency <= 0 {
-		maxConcurrency = 1
-	}
-	if maxConcurrency > len(req.Items) {
-		maxConcurrency = len(req.Items)
-	}
-
-	itemCtx := ctx
-	chunkSize := req.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = s.cfg.BulkChunkSize
-	}
-	if chunkSize > 0 {
-		itemCtx = rpc.WithGetMultipleAccountsChunkSize(itemCtx, chunkSize)
-	}
-
+	_, itemCtx := s.resolveBulkExecution(req.MaxConcurrency, req.ChunkSize, len(req.Items), ctx)
 	results := make([]GetMetricsByPumpfunBondingCurveItemResult, len(req.Items))
-	sem := make(chan struct{}, maxConcurrency)
-	var wg sync.WaitGroup
+	validIndices := make([]int, 0, len(req.Items))
+	validAddresses := make([]solana.PublicKey, 0, len(req.Items))
 
 	for i := range req.Items {
-		i := i
 		item := req.Items[i]
+		results[i] = GetMetricsByPumpfunBondingCurveItemResult{Item: item}
+		if err := validatePumpfunBondingCurveBulkItem(item); err != nil {
+			results[i].Error = toSDKError(err)
+			continue
+		}
+		poolAddress, _, err := findProgramAddress([][]byte{
+			[]byte(pumpfunBondingCurveSeed),
+			item.TokenMint.Bytes(),
+		}, pumpfunProgramID)
+		if err != nil {
+			results[i].Error = toSDKError(NewError(classifyErrorCode(err), "derive pumpfun bonding curve address", err))
+			continue
+		}
+		validIndices = append(validIndices, i)
+		validAddresses = append(validAddresses, poolAddress)
+	}
 
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			result := GetMetricsByPumpfunBondingCurveItemResult{Item: item}
-			if err := validatePumpfunBondingCurveBulkItem(item); err != nil {
-				result.Error = toSDKError(err)
-				results[i] = result
-				return
+	preloaded := rpc.NewPreloadedClient(s.cfg.RPCClient)
+	if len(validAddresses) > 0 {
+		if err := preloaded.PrimeAccounts(itemCtx, validAddresses); err != nil {
+			for _, index := range validIndices {
+				results[index].Error = toSDKError(err)
 			}
-
-			metrics, err := s.GetMetricsByPumpfunBondingCurve(itemCtx, GetMetricsByPumpfunBondingCurveRequest{
+		}
+	}
+	groupService := s.withRPCClient(preloaded)
+	if len(validAddresses) > 0 {
+		for _, index := range validIndices {
+			if results[index].Error != nil {
+				continue
+			}
+			item := req.Items[index]
+			metrics, err := groupService.GetMetricsByPumpfunBondingCurve(itemCtx, GetMetricsByPumpfunBondingCurveRequest{
 				MintA: item.TokenMint,
 				MintB: solana.SolMint,
 			})
 			if err != nil {
-				result.Error = toSDKError(err)
+				results[index].Error = toSDKError(err)
 			} else {
-				result.Metrics = metrics
+				results[index].Metrics = metrics
 			}
-			results[i] = result
-		}()
+		}
 	}
-
-	wg.Wait()
+	s.annotateBulkBondingDebug(itemCtx, results, preloaded.Stats())
 	return &GetMetricsByPumpfunBondingCurvesResponse{Results: results}, nil
 }
 
@@ -284,13 +344,95 @@ func toSDKError(err error) *SDKError {
 	}
 	var sdkErr *SDKError
 	if errors.As(err, &sdkErr) {
+		if sdkErr.Code == ErrCodeInternal && sdkErr.Err != nil {
+			return &SDKError{
+				Code:    classifyErrorCode(sdkErr.Err),
+				Message: sdkErr.Message,
+				Err:     sdkErr.Err,
+			}
+		}
 		return sdkErr
 	}
 	return &SDKError{
-		Code:    ErrCodeInternal,
+		Code:    classifyErrorCode(err),
 		Message: err.Error(),
 		Err:     err,
 	}
+}
+
+func (s *Service) resolveBulkExecution(maxConcurrency, chunkSize, totalItems int, ctx context.Context) (int, context.Context) {
+	if maxConcurrency <= 0 {
+		maxConcurrency = s.cfg.MaxBulkConcurrency
+	}
+	if maxConcurrency <= 0 {
+		maxConcurrency = 1
+	}
+	if maxConcurrency > totalItems {
+		maxConcurrency = totalItems
+	}
+	itemCtx := ctx
+	if chunkSize <= 0 {
+		chunkSize = s.cfg.BulkChunkSize
+	}
+	if chunkSize > 0 {
+		itemCtx = rpc.WithGetMultipleAccountsChunkSize(itemCtx, chunkSize)
+	}
+	return maxConcurrency, itemCtx
+}
+
+func (s *Service) withRPCClient(client rpc.Client) *Service {
+	cfg := s.cfg
+	cfg.RPCClient = client
+	if _, ok := s.cfg.SupplyProvider.(*supply.DefaultProvider); ok {
+		cfg.SupplyProvider = supply.NewDefaultProvider(client)
+	}
+	return NewService(cfg)
+}
+
+func (s *Service) canRebuildRoute(route PoolRoute) bool {
+	if _, ok := s.cfg.PoolCalculatorFactories[route]; ok {
+		return true
+	}
+	if _, ok := defaultPoolCalculatorFactories()[route]; ok {
+		return true
+	}
+	return false
+}
+
+func (s *Service) annotateBulkDebug(ctx context.Context, operation string, groups []string, results []GetMetricsByPoolItemResult, stats rpc.PreloadStats) {
+	failedByCode := map[string]int{}
+	for i := range results {
+		if results[i].Error == nil {
+			continue
+		}
+		failedByCode[string(results[i].Error.Code)]++
+	}
+	annotateRequestDebug(ctx, map[string]any{
+		"bulk_operation":              operation,
+		"protocol_groups":             groups,
+		"failed_item_reasons":         failedByCode,
+		"get_multiple_accounts_calls": stats.GetMultipleAccountsCalls,
+		"get_account_calls":           stats.GetAccountCalls,
+		"total_accounts_requested":    stats.TotalAccountsRequested,
+	})
+}
+
+func (s *Service) annotateBulkBondingDebug(ctx context.Context, results []GetMetricsByPumpfunBondingCurveItemResult, stats rpc.PreloadStats) {
+	failedByCode := map[string]int{}
+	for i := range results {
+		if results[i].Error == nil {
+			continue
+		}
+		failedByCode[string(results[i].Error.Code)]++
+	}
+	annotateRequestDebug(ctx, map[string]any{
+		"bulk_operation":              "GetMetricsByPumpfunBondingCurves",
+		"protocol_groups":             []string{fmt.Sprintf("%s/%s", DexPumpfun, PoolVersionPumpfunBondingCurve)},
+		"failed_item_reasons":         failedByCode,
+		"get_multiple_accounts_calls": stats.GetMultipleAccountsCalls,
+		"get_account_calls":           stats.GetAccountCalls,
+		"total_accounts_requested":    stats.TotalAccountsRequested,
+	})
 }
 
 func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
@@ -305,7 +447,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "pumpfun amm metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "pumpfun amm metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -320,7 +462,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "raydium liquidity v4 metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "raydium liquidity v4 metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -335,7 +477,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "raydium cpmm metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "raydium cpmm metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -350,7 +492,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "raydium clmm metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "raydium clmm metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -365,7 +507,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "raydium launchpad metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "raydium launchpad metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -380,7 +522,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "meteora dlmm metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "meteora dlmm metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -395,7 +537,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "meteora dbc metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "meteora dbc metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -410,7 +552,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "meteora damm v1 metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "meteora damm v1 metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -425,7 +567,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "meteora damm v2 metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "meteora damm v2 metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})
@@ -440,7 +582,7 @@ func defaultPoolCalculatorFactories() map[PoolRoute]PoolCalculatorFactory {
 					PoolAddress: pool.PoolAddress,
 				})
 				if err != nil {
-					return nil, NewError(ErrCodeInternal, "orca whirlpool metrics failed", err)
+					return nil, NewError(classifyErrorCode(err), "orca whirlpool metrics failed", err)
 				}
 				return buildMetricsResponse(pool, result.MintA, result.MintB, result.PriceOfAInB, result.PriceOfAInSOL, result.LiquidityInB, result.LiquidityInSOL, result.MarketCapInSOL, result.FDVInSOL, result.TotalSupply, result.CirculatingSupply, result.SupplyMethod, result.Metadata), nil
 			})

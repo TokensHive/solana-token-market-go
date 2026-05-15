@@ -65,3 +65,26 @@ func TestRecorderSnapshotWithoutMarkDone(t *testing.T) {
 		t.Fatalf("expected positive computed duration, got %v", snapshot["duration_ms"])
 	}
 }
+
+func TestRecorderAnnotate(t *testing.T) {
+	r := NewRecorder("annotated")
+	r.Annotate("bulk_operation", "GetMetricsByPools")
+	r.Annotate("", "ignored")
+	snapshot := r.SnapshotMap()
+	annotations, ok := snapshot["annotations"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected annotations map in snapshot, got %#v", snapshot["annotations"])
+	}
+	if annotations["bulk_operation"] != "GetMetricsByPools" {
+		t.Fatalf("unexpected annotation value: %#v", annotations["bulk_operation"])
+	}
+
+	var nilRecorder *Recorder
+	nilRecorder.Annotate("x", 1)
+
+	manual := &Recorder{}
+	manual.Annotate("k", "v")
+	if got := manual.SnapshotMap()["annotations"].(map[string]any)["k"]; got != "v" {
+		t.Fatalf("expected manual recorder annotation, got %#v", got)
+	}
+}

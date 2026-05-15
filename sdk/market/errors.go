@@ -5,11 +5,16 @@ import "fmt"
 type ErrorCode string
 
 const (
-	ErrCodeInvalidArgument ErrorCode = "invalid_argument"
-	ErrCodeNotFound        ErrorCode = "not_found"
-	ErrCodeRPC             ErrorCode = "rpc_error"
-	ErrCodeDecode          ErrorCode = "decode_error"
-	ErrCodeInternal        ErrorCode = "internal"
+	ErrCodeInvalidArgument  ErrorCode = "invalid_argument"
+	ErrCodeNotFound         ErrorCode = "not_found"
+	ErrCodeUnsupportedRoute ErrorCode = "unsupported_route"
+	ErrCodeAccountNotFound  ErrorCode = "account_not_found"
+	ErrCodeRPC              ErrorCode = "rpc_error"
+	ErrCodeDecode           ErrorCode = "decode_error"
+	ErrCodeRateLimited      ErrorCode = "rate_limited"
+	ErrCodeRPCUnavailable   ErrorCode = "rpc_unavailable"
+	ErrCodeTimeout          ErrorCode = "timeout"
+	ErrCodeInternal         ErrorCode = "internal"
 )
 
 type SDKError struct {

@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/TokensHive/solana-token-market-go/sdk/internal/reqdebug"
 	"github.com/TokensHive/solana-token-market-go/sdk/quote"
@@ -27,6 +28,12 @@ func NewClient(opts ...Option) (*Client, error) {
 	if cfg.RPCClient == nil {
 		cfg.RPCClient = rpc.NewNoopClient()
 	}
+	cfg.RPCClient = rpc.NewRetryClient(cfg.RPCClient, rpc.RetryConfig{
+		MaxRetries:     cfg.RPCRetryMaxRetries,
+		InitialBackoff: time.Duration(cfg.RPCRetryInitialBackoff) * time.Millisecond,
+		MaxBackoff:     time.Duration(cfg.RPCRetryMaxBackoff) * time.Millisecond,
+		JitterFraction: cfg.RPCRetryJitterFraction,
+	})
 	cfg.RPCClient = rpc.NewChunkingClient(cfg.RPCClient, cfg.BulkChunkSize)
 	if cfg.QuoteBridge == nil {
 		cfg.QuoteBridge = quote.NewNoopBridge()

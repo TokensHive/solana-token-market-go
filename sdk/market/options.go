@@ -16,6 +16,10 @@ type Config struct {
 	MaxTxSignatures         int
 	MaxBulkConcurrency      int
 	BulkChunkSize           int
+	RPCRetryMaxRetries      int
+	RPCRetryInitialBackoff  int
+	RPCRetryMaxBackoff      int
+	RPCRetryJitterFraction  float64
 	PoolCalculatorFactories map[PoolRoute]PoolCalculatorFactory
 }
 
@@ -26,6 +30,10 @@ func defaultConfig() Config {
 		MaxTxSignatures:         120,
 		MaxBulkConcurrency:      8,
 		BulkChunkSize:           100,
+		RPCRetryMaxRetries:      2,
+		RPCRetryInitialBackoff:  100,
+		RPCRetryMaxBackoff:      1200,
+		RPCRetryJitterFraction:  0.2,
 		PoolCalculatorFactories: map[PoolRoute]PoolCalculatorFactory{},
 	}
 }
@@ -80,6 +88,42 @@ func WithBulkChunkSize(size int) Option {
 	return func(cfg *Config) error {
 		if size > 0 {
 			cfg.BulkChunkSize = size
+		}
+		return nil
+	}
+}
+
+func WithRPCRetryMaxRetries(retries int) Option {
+	return func(cfg *Config) error {
+		if retries >= 0 {
+			cfg.RPCRetryMaxRetries = retries
+		}
+		return nil
+	}
+}
+
+func WithRPCRetryInitialBackoffMS(backoffMS int) Option {
+	return func(cfg *Config) error {
+		if backoffMS > 0 {
+			cfg.RPCRetryInitialBackoff = backoffMS
+		}
+		return nil
+	}
+}
+
+func WithRPCRetryMaxBackoffMS(backoffMS int) Option {
+	return func(cfg *Config) error {
+		if backoffMS > 0 {
+			cfg.RPCRetryMaxBackoff = backoffMS
+		}
+		return nil
+	}
+}
+
+func WithRPCRetryJitterFraction(jitter float64) Option {
+	return func(cfg *Config) error {
+		if jitter >= 0 {
+			cfg.RPCRetryJitterFraction = jitter
 		}
 		return nil
 	}

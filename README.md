@@ -77,7 +77,11 @@ For Pump.fun `bonding_curve`, use `GetMetricsByPumpfunBondingCurve` (mint-based 
 | `Results[i].Metrics` | Populated on success. Same schema as `GetMetricsByPoolResponse`. |
 | `Results[i].Error` | Populated on failure for that item. Partial success is supported. |
 
-Bulk requests apply bounded concurrency and account-batch chunking automatically to reduce RPC pressure on large pool lists.
+`GetMetricsByPools` is a true RPC-bulk path:
+- groups input by `Dex + PoolVersion`
+- preloads group accounts through `GetMultipleAccounts`
+- computes items from a shared request-scoped account loader/cache
+- preserves ordered partial success output
 
 ## GetMetricsByPumpfunBondingCurves (Bulk) Contract
 
@@ -96,6 +100,27 @@ Bulk requests apply bounded concurrency and account-batch chunking automatically
 | `Results[i].Item` | Input token mint for item `i` (same ordering as request). |
 | `Results[i].Metrics` | Populated on success. Same schema as `GetMetricsByPoolResponse`. |
 | `Results[i].Error` | Populated on failure for that item (`invalid_argument` for invalid token mint, partial success supported). |
+
+`GetMetricsByPumpfunBondingCurves` is also a true RPC-bulk path:
+- derives all bonding-curve PDAs from token mints
+- preloads curve accounts with chunked `GetMultipleAccounts`
+- computes each item from the preloaded request-scoped account cache
+
+### Bulk Error Codes
+
+Per-item `Error.Code` can be:
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_argument` | Input validation failure for that item. |
+| `unsupported_route` | Unsupported `(dex, pool_version)` route. |
+| `account_not_found` | Required account missing on RPC. |
+| `decode_error` | Account decode/layout mismatch. |
+| `rate_limited` | Provider rate-limit response (for example HTTP 429). |
+| `rpc_unavailable` | RPC endpoint/network unavailable/transient infra failure. |
+| `timeout` | Request or transport timeout/deadline exceeded. |
+| `rpc_error` | Other RPC-layer error not mapped above. |
+| `internal` | Non-RPC internal error path. |
 
 ### Response
 
@@ -268,8 +293,23 @@ Useful flags:
 
 Bulk tuning options:
 
-- `market.WithMaxBulkConcurrency(n)` to cap workers for `GetMetricsByPools` and `GetMetricsByPumpfunBondingCurves`
+- `market.WithMaxBulkConcurrency(n)` to cap concurrent protocol groups/chunks for `GetMetricsByPools` and `GetMetricsByPumpfunBondingCurves`
 - `market.WithBulkChunkSize(n)` to cap `GetMultipleAccounts` chunk size for large account sets
+- `market.WithRPCRetryMaxRetries(n)` to cap bounded retries for transient RPC failures
+- `market.WithRPCRetryInitialBackoffMS(ms)` to set retry backoff start
+- `market.WithRPCRetryMaxBackoffMS(ms)` to set retry backoff cap
+- `market.WithRPCRetryJitterFraction(x)` to set retry jitter fraction (`0.0` to disable)
+
+## Gateway Migration (v0.0.5)
+
+When upgrading from `v0.0.4`:
+
+- Prefer bulk methods for gateway/frontend traffic: `GetMetricsByPools` and `GetMetricsByPumpfunBondingCurves`.
+- Treat per-item `Error.Code` as the primary classification signal (especially `rate_limited`, `rpc_unavailable`, `timeout`).
+- Keep partial-success handling: one failed item no longer implies whole-call failure.
+- Keep request order semantics: `Results[i]` still maps to input item `i`.
+
+Detailed checklist: [`docs/migration-v0.0.5.md`](docs/migration-v0.0.5.md).
 
 ## Milestone: Resilience, Performance, and Integrations
 

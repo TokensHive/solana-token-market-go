@@ -65,7 +65,7 @@ func (c *SolanaRPCClient) GetAccount(ctx context.Context, address solana.PublicK
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return &AccountInfo{Address: address, Exists: false}, nil
 		}
-		return nil, err
+		return nil, WrapClientError("get_account", err)
 	}
 	if res == nil || res.Value == nil {
 		return &AccountInfo{Address: address, Exists: false}, nil
@@ -82,7 +82,7 @@ func (c *SolanaRPCClient) GetMultipleAccounts(ctx context.Context, addresses []s
 		recorder.RecordRPC("get_multiple_accounts", time.Since(startedAt))
 	}
 	if err != nil {
-		return nil, err
+		return nil, WrapClientError("get_multiple_accounts", err)
 	}
 	out := make([]*AccountInfo, 0, len(addresses))
 	for i, v := range res.Value {
@@ -104,7 +104,7 @@ func (c *SolanaRPCClient) GetTokenSupply(ctx context.Context, mint solana.Public
 		recorder.RecordRPC("get_token_supply", time.Since(startedAt))
 	}
 	if err != nil {
-		return decimal.Zero, 0, err
+		return decimal.Zero, 0, WrapClientError("get_token_supply", err)
 	}
 	amt, err := decimal.NewFromString(res.Value.Amount)
 	if err != nil {
@@ -136,7 +136,7 @@ func (c *SolanaRPCClient) GetSignaturesForAddress(ctx context.Context, address s
 		recorder.RecordRPC("get_signatures_for_address", time.Since(startedAt))
 	}
 	if err != nil {
-		return nil, err
+		return nil, WrapClientError("get_signatures_for_address", err)
 	}
 	return res, nil
 }
@@ -154,7 +154,7 @@ func (c *SolanaRPCClient) GetTransaction(ctx context.Context, signature solana.S
 		recorder.RecordRPC("get_transaction", time.Since(startedAt))
 	}
 	if err != nil {
-		return nil, err
+		return nil, WrapClientError("get_transaction", err)
 	}
 	if res == nil {
 		return nil, fmt.Errorf("transaction not found: %s", signature.String())
@@ -181,7 +181,7 @@ func (c *SolanaRPCClient) GetTransactionRaw(ctx context.Context, signature solan
 		recorder.RecordRPC("get_transaction_raw", time.Since(startedAt))
 	}
 	if err != nil {
-		return nil, err
+		return nil, WrapClientError("get_transaction_raw", err)
 	}
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, fmt.Errorf("transaction not found: %s", signature.String())

@@ -40,3 +40,13 @@ func attachRequestDebug(ctx context.Context, meta map[string]any) map[string]any
 	meta["requests"] = recorder.SnapshotMap()
 	return meta
 }
+
+func annotateRequestDebug(ctx context.Context, values map[string]any) {
+	recorder := reqdebug.FromContext(ctx)
+	if recorder == nil || len(values) == 0 {
+		return
+	}
+	for key, value := range values {
+		recorder.Annotate(key, value)
+	}
+}
